@@ -938,8 +938,181 @@ body.mode-advanced .dashboard-grid {
 }
 
 /* ==========================================================================
+   VIEW MODES: SIMPLE (DEFAULT) VS ADVANCED
+   ========================================================================== */
+body.mode-simple .dashboard-grid {
+  grid-template-columns: 1fr;
+}
+
+body.mode-simple .advanced-panel {
+  display: none;
+}
+
+/* ==========================================================================
    SEARCH & LOCATION WIDGETS
    ========================================================================== */
+.search-hero-bar {
+  background: rgba(13, 19, 31, 0.9);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.search-hero-title {
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--accent-cyan);
+  margin-bottom: 0.6rem;
+  font-family: var(--font-mono);
+}
+
+.search-hero-controls {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+@media (max-width: 768px) {
+  .search-hero-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.search-input-wrapper {
+  flex: 1;
+  position: relative;
+}
+
+.hero-search-input {
+  font-size: 1rem;
+  padding: 0.85rem 1.15rem;
+  border-radius: var(--radius-md);
+  border: 1.5px solid rgba(0, 240, 255, 0.3);
+  background: rgba(7, 10, 16, 0.9);
+}
+
+.hero-search-input:focus {
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 16px rgba(0, 240, 255, 0.35);
+}
+
+.btn-use-gps {
+  padding: 0.85rem 1.25rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  background: rgba(16, 185, 129, 0.15);
+  border: 1px solid var(--accent-emerald);
+  color: var(--accent-emerald);
+  font-weight: 700;
+}
+
+.btn-use-gps:hover {
+  background: rgba(16, 185, 129, 0.25);
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.4);
+}
+
+.start-location-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 0.75rem;
+  font-size: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.location-chip-badge {
+  background: rgba(255, 255, 255, 0.05);
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-family: var(--font-mono);
+}
+
+.btn-text-link {
+  background: transparent;
+  border: none;
+  color: var(--accent-cyan);
+  cursor: pointer;
+  font-size: 0.75rem;
+  text-decoration: underline;
+  padding: 0;
+  font-family: var(--font-main);
+}
+
+.custom-start-container {
+  display: none;
+  margin-top: 0.6rem;
+  position: relative;
+}
+
+.custom-start-container.visible {
+  display: block;
+}
+
+.nav-action-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+/* Route Summary Card */
+.route-summary-card {
+  background: linear-gradient(135deg, rgba(2, 132, 199, 0.15), rgba(13, 19, 31, 0.95));
+  border: 1px solid var(--accent-cyan);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.25rem;
+  margin-top: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+  box-shadow: 0 4px 20px rgba(0, 240, 255, 0.15);
+  animation: fadeIn 0.3s ease;
+}
+
+/* Map Error Overlay */
+.map-error-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(7, 10, 16, 0.92);
+  z-index: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1.5rem;
+  backdrop-filter: blur(8px);
+}
+
+.map-error-box {
+  max-width: 440px;
+  background: rgba(13, 19, 31, 0.95);
+  border: 1px solid var(--accent-amber);
+  border-radius: var(--radius-lg);
+  padding: 1.75rem;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.8);
+}
+
+.map-error-icon {
+  font-size: 2.2rem;
+  margin-bottom: 0.5rem;
+}
+
+.map-floating-btn.visible {
+  display: flex !important;
+  background: var(--accent-cyan) !important;
+  color: #070a10 !important;
+  font-weight: 700 !important;
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.6) !important;
+}
+
 .location-inputs-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

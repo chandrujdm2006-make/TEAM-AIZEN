@@ -275,6 +275,10 @@ router.post('/route', async (req, res) => {
           formatted_distance: formatDistance(step.distance),
           duration_s: Math.round(step.duration),
           maneuver_type: maneuverType,
+          modifier: maneuver.modifier || null,
+          raw_type: maneuver.type || null,
+          bearing_after: typeof maneuver.bearing_after === 'number' ? maneuver.bearing_after : null,
+          bearing_before: typeof maneuver.bearing_before === 'number' ? maneuver.bearing_before : null,
           street_name: streetName
         });
       }

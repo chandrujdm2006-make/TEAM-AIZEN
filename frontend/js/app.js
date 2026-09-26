@@ -250,14 +250,19 @@ class App {
 
       window.navMap.drawRoute(this.routePoints);
       window.navMap.routeSteps = this.routePoints;
+      window.navMap.currentStepIndex = this.routePoints.length > 1 ? 1 : 0;
+      const totalDist = trip.total_distance_m || trip.totalDistanceM || 0;
       window.navMap.activeRoute = {
-        totalDistanceM: trip.total_distance_m || trip.totalDistanceM,
-        totalDurationS: trip.total_duration_s || trip.totalDurationS
+        totalDistanceM: totalDist,
+        totalDurationS: trip.total_duration_s || trip.totalDurationS || 0,
+        formattedDistance: totalDist >= 1000 ? `${(totalDist / 1000).toFixed(1)} km` : `${Math.round(totalDist)} m`,
+        formattedDuration: trip.total_duration_s ? Math.round(trip.total_duration_s / 60) + ' min' : '--',
+        origin: trip.origin,
+        destination: trip.destination
       };
 
-      if (this.routePoints.length > 0) {
-        window.navMap.updateNextTurnCard(this.routePoints[0], this.routePoints[0].distance_to_next_turn || 150);
-      }
+      window.navMap.updateRouteSummaryUI(window.navMap.activeRoute);
+      window.navMap.setState('ROUTE_READY');
     }
 
     // Configure simulator

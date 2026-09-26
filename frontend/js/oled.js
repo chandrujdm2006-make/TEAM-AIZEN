@@ -19,6 +19,9 @@ class OledDisplay {
     const roundaboutSvg = `<svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9M21 7l-4 5h5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
     const destinationSvg = `<svg viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
+    const sharpLeftSvg = `<svg viewBox="0 0 24 24"><path d="M18 19v-7a3 3 0 0 0-3-3H6M10 5L5 9l5 5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    const sharpRightSvg = `<svg viewBox="0 0 24 24"><path d="M6 19v-7a3 3 0 0 1 3-3h9M14 5l5 4-5 4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
     this.icons = {
       'straight': straightSvg,
       'depart': straightSvg,
@@ -31,13 +34,16 @@ class OledDisplay {
       'SLIGHT_LEFT': slightLeftSvg,
       'turn-slight-right': slightRightSvg,
       'SLIGHT_RIGHT': slightRightSvg,
-      'turn-sharp-left': leftSvg,
-      'turn-sharp-right': rightSvg,
+      'turn-sharp-left': sharpLeftSvg,
+      'SHARP_LEFT': sharpLeftSvg,
+      'turn-sharp-right': sharpRightSvg,
+      'SHARP_RIGHT': sharpRightSvg,
       'uturn': uTurnSvg,
       'U_TURN': uTurnSvg,
       'roundabout': roundaboutSvg,
       'ROUNDABOUT': roundaboutSvg,
       'arrive': destinationSvg,
+      'ARRIVED': destinationSvg,
       'DESTINATION': destinationSvg,
       'obstacle': `<svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
       'sos': `<svg viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`
