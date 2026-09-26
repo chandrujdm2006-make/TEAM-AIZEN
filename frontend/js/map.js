@@ -82,8 +82,8 @@ class NavigationMap {
   constructor(mapContainerId = 'map') {
     this.mapContainerId = mapContainerId;
     this.map = null;
-    this.tileLayers = {};
-    this.currentTileStyle = 'dark';
+    this.osmTileLayer = null;
+    this.currentTileStyle = 'standard';
     this.tileErrorCount = 0;
 
     // Follow Mode & Camera Control State
@@ -190,30 +190,25 @@ class NavigationMap {
       // Custom Zoom control at top-left
       L.control.zoom({ position: 'topleft' }).addTo(this.map);
 
-      // 1. Dark HUD Tile Layer (CartoDB Dark Matter without {r} bug)
-      this.tileLayers.dark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
-        subdomains: 'abcd',
-        maxZoom: 19
-      });
-
-      // 2. Voyager Tile Layer (OpenStreetMap data, high availability, no 403 block)
-      this.tileLayers.osm = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
-        subdomains: 'abcd',
+      // OpenStreetMap Standard Tile Layer (100% Free, Zero API Keys, Zero CARTO dependency)
+      this.osmTileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+        subdomains: 'abc',
         maxZoom: 19
       });
 
       // Tile error detection
-      this.tileLayers.dark.on('tileerror', () => {
+      let tileNoticeShown = false;
+      this.osmTileLayer.on('tileerror', () => {
         this.tileErrorCount++;
-        if (this.tileErrorCount > 5) {
+        if (this.tileErrorCount > 4 && !tileNoticeShown) {
+          tileNoticeShown = true;
           this.showMapConnectionError();
         }
       });
 
-      // Add initial dark HUD layer
-      this.tileLayers.dark.addTo(this.map);
+      // Add initial OpenStreetMap layer
+      this.osmTileLayer.addTo(this.map);
 
       // User interaction detection: immediately stop follow mode and show RECENTER button
       this.map.on('dragstart', () => {
@@ -256,15 +251,7 @@ class NavigationMap {
   }
 
   showMapConnectionError() {
-    if (this.mapErrorOverlay) {
-      this.mapErrorOverlay.style.display = 'flex';
-    } else {
-      this.showNotice(
-        'MAP CONNECTION ERROR: Unable to load online map tiles. Destination search and navigation remain functional. <button onclick="window.navMap.retryTiles()" class="btn btn-secondary" style="padding:2px 8px;font-size:0.7rem;margin-left:8px;">Retry</button>',
-        'warning',
-        0
-      );
-    }
+    this.showNotice('Map tiles unavailable. Check your internet connection.', 'warning', 5000);
   }
 
   retryTiles() {
@@ -272,8 +259,10 @@ class NavigationMap {
     if (this.mapErrorOverlay) {
       this.mapErrorOverlay.style.display = 'none';
     }
+    if (this.osmTileLayer) {
+      this.osmTileLayer.redraw();
+    }
     if (this.map) {
-      this.toggleTileStyle();
       this.map.invalidateSize();
     }
   }
@@ -379,16 +368,15 @@ class NavigationMap {
 
   toggleTileStyle() {
     if (!this.map) return;
+    const mapEl = document.getElementById(this.mapContainerId);
     if (this.currentTileStyle === 'dark') {
-      this.map.removeLayer(this.tileLayers.dark);
-      this.tileLayers.osm.addTo(this.map);
-      this.currentTileStyle = 'osm';
+      if (mapEl) mapEl.classList.remove('dark-hud-tiles');
+      this.currentTileStyle = 'standard';
       this.showNotice('Switched to Standard OpenStreetMap view.', 'info', 2000);
     } else {
-      this.map.removeLayer(this.tileLayers.osm);
-      this.tileLayers.dark.addTo(this.map);
+      if (mapEl) mapEl.classList.add('dark-hud-tiles');
       this.currentTileStyle = 'dark';
-      this.showNotice('Switched to Dark HUD Map view.', 'info', 2000);
+      this.showNotice('Switched to Night Mode OpenStreetMap view.', 'info', 2000);
     }
   }
 

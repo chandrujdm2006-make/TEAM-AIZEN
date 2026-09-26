@@ -15,7 +15,7 @@ if (mapJsContent.includes('{y}{r}.png')) {
   console.error('❌ [FAIL] map.js still contains {r} tile URL bug!');
   process.exit(1);
 } else {
-  console.log('✅ [PASS] Tile URL verification: CartoDB Dark Matter URL is fixed (no {r} bug)');
+  console.log('✅ [PASS] Tile URL verification: OpenStreetMap tile URL is active (no CARTO dependency)');
 }
 
 // 2. Verify Maneuver Models defined

@@ -156,34 +156,18 @@ Firmware source files are located in `/firmware/esp32c3_rider_assistant/`. See [
 
 ---
 
-## ⚙️ 8. Google Maps API Setup & Environment Variables
+## 🗺️ 8. Map Engine & Zero API Key Requirement
 
-The web companion navigation integrates the **Google Maps JavaScript API**, **Google Places API**, and **Google Directions API**.
+The web companion navigation is built using **Leaflet.js** and **OpenStreetMap**:
+- **No API Key Required**: The interactive map view, tile loading, place searching, and routing work out of the box with zero configuration and zero credit card / billing dependencies.
+- **Tiles**: Official OpenStreetMap standard tiles (`https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png`) with zero watermark or API key requirement.
+- **Search & Autocomplete**: OpenStreetMap Nominatim / Photon geocoding proxy (`/api/navigation/search`).
+- **Turn-by-Turn Routing**: Public Open Source Routing Machine (OSRM) service with local realistic mock fallbacks.
 
-### Required Google Cloud APIs:
-In your [Google Cloud Console](https://console.cloud.google.com/):
-1. **Maps JavaScript API** — Renders the interactive dark-themed HUD map and navigation markers.
-2. **Places API** (or Places API New) — Powers the `Where do you want to go?` autocomplete search for landmarks, colleges, airports, etc.
-3. **Directions API** — Calculates driving routes, distance, duration, and turn-by-turn maneuvers.
-
-### Setup Instructions:
-1. Go to **Google Cloud Console → APIs & Services → Library**.
-2. Search and click **Enable** for:
-   - *Maps JavaScript API*
-   - *Places API*
-   - *Directions API*
-3. Go to **Credentials → Create Credentials → API Key**.
-4. (Recommended) Click **Edit API Key** to restrict it to *HTTP referrers (websites)*: `http://localhost:3000/*` and restrict API usage to the 3 APIs above.
-5. Copy your API key into your `.env` file at the root of the project:
-   ```env
-   VITE_GOOGLE_MAPS_API_KEY=AIzaSyYourActualKeyHere
-   GOOGLE_MAPS_API_KEY=AIzaSyYourActualKeyHere
-   PORT=3000
-   ```
-6. Restart the server:
-   ```bash
-   npm run dev
-   ```
+### Optional Google Maps Fallback:
+If you wish to use Google Maps Directions API as an optional secondary fallback for route calculations:
+1. Provide `GOOGLE_MAPS_API_KEY=your_key` in `.env`.
+2. If omitted, the system seamlessly uses OSRM and OpenStreetMap with zero disruption.
 
 ---
 
@@ -191,13 +175,13 @@ In your [Google Cloud Console](https://console.cloud.google.com/):
 
 ### Testing Current Location:
 1. Open `http://localhost:3000` in Chrome/Edge/Firefox.
-2. Click **Current Location**.
+2. Click **Current Location** (or the crosshair icon).
 3. When prompted by the browser: `localhost:3000 wants to know your location`, click **Allow**.
-4. The Google Map will immediately center on your real GPS coordinates and display the cyan navigation marker with an active radar pulse.
+4. The map will center on your real GPS coordinates and display the cyan navigation marker with an active radar pulse.
 
 ### Testing Destination Routing:
 1. In the **"Where do you want to go?"** input, begin typing any destination (e.g., `Kempegowda International Airport`, `Bangalore City Railway Station`, or any local landmark).
-2. Select your destination from the Google Places autocomplete dropdown.
+2. Select your destination from the OpenStreetMap autocomplete dropdown.
 3. The driving route polyline will appear in neon cyan, and the destination marker will be pinned.
 4. Click **START NAVIGATION** to begin active turn-by-turn guidance.
 5. The HUD and the physical OLED simulator will display the first turn instruction (e.g. `Turn Right in 180 m`) and begin live GPS tracking.
