@@ -83,18 +83,35 @@ const io = new Server(server, {
 // Attach Socket.IO to broadcaster
 socketModule.initSocket(io);
 
-// 6. Start listening
-server.listen(config.PORT, config.HOST, () => {
-  console.log('\n===============================================================');
-  console.log('   🏍️ TURN-BY-TURN NAVIGATION SYSTEM (IOT RIDER ASSISTANT)');
-  console.log('   Dept. of IT - Mini Project II Prototype Server');
-  console.log('===============================================================');
-  console.log(`📡 Backend Server & API: http://localhost:${config.PORT}`);
-  console.log(`🌐 Web Companion App:   http://localhost:${config.PORT}`);
-  console.log(`💾 SQLite Database:     ${config.DB_PATH}`);
-  console.log(`⚡ WebSocket:            Socket.IO active`);
-  console.log(`📍 Hardware Target:     ESP32-C3 + NEO-6M GPS + SSD1306 OLED`);
-  console.log('===============================================================\n');
-});
+// 6. Start listening with automatic port conflict fallback
+function startServer(port) {
+  const onListen = () => {
+    console.log('\n===============================================================');
+    console.log('   🏍️ TURN-BY-TURN NAVIGATION SYSTEM (IOT RIDER ASSISTANT)');
+    console.log('   Dept. of IT - Mini Project II Prototype Server');
+    console.log('===============================================================');
+    console.log(`📡 Backend Server & API: http://localhost:${port}`);
+    console.log(`🌐 Web Companion App:   http://localhost:${port}`);
+    console.log(`💾 SQLite Database:     ${config.DB_PATH}`);
+    console.log(`⚡ WebSocket:            Socket.IO active`);
+    console.log(`📍 Hardware Target:     ESP32-C3 + NEO-6M GPS + SSD1306 OLED`);
+    console.log('===============================================================\n');
+  };
+
+  const onError = (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`[Server] Port ${port} is occupied, trying port ${port + 1}...`);
+      server.removeListener('error', onError);
+      startServer(port + 1);
+    } else {
+      console.error('[Server] Fatal startup error:', err);
+    }
+  };
+
+  server.once('error', onError);
+  server.listen(port, config.HOST, onListen);
+}
+
+startServer(Number(config.PORT) || 3000);
 
 module.exports = { app, server };
