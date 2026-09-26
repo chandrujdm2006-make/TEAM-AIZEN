@@ -1,0 +1,350 @@
+/* ==========================================================================
+   PHYSICAL SSD1306 0.96" OLED HARDWARE SIMULATOR STYLES
+   Turn-by-Turn Navigation System (ESP32-C3 Companion)
+   ========================================================================== */
+
+/* The outer PCB (Printed Circuit Board) module container */
+.oled-pcb-module {
+  background: #0f172a;
+  background-image: 
+    radial-gradient(ellipse at center, #1e293b 0%, #0f172a 100%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, transparent 100%);
+  border: 2px solid #334155;
+  border-radius: 12px;
+  padding: 24px 20px 18px;
+  position: relative;
+  box-shadow: 
+    0 20px 40px -10px rgba(0, 0, 0, 0.8),
+    inset 0 1px 1px rgba(255, 255, 255, 0.2),
+    0 0 0 1px rgba(0, 0, 0, 0.5);
+  margin: 0 auto;
+  max-width: 480px;
+}
+
+/* PCB Mounting Holes (4 Brass Screws) */
+.pcb-screw {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ca8a04 35%, #713f12 70%, #1e293b 100%);
+  border: 1px solid #eab308;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6), 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.pcb-screw::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 2px;
+  background: #422006;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.pcb-screw.top-left { top: 8px; left: 8px; }
+.pcb-screw.top-right { top: 8px; right: 8px; }
+.pcb-screw.bottom-left { bottom: 8px; left: 8px; }
+.pcb-screw.bottom-right { bottom: 8px; right: 8px; }
+
+/* Pin Header Labels (GND, VCC, SCL, SDA) */
+.pcb-header-pins {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.pin-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.pin-hole {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #eab308;
+  border: 2px solid #713f12;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.pin-text {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: #94a3b8;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+/* Silkscreen text on PCB */
+.pcb-silkscreen {
+  position: absolute;
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  color: rgba(255, 255, 255, 0.35);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+}
+
+.pcb-silkscreen.left-tag {
+  bottom: 8px;
+  left: 32px;
+}
+
+.pcb-silkscreen.right-tag {
+  bottom: 8px;
+  right: 32px;
+}
+
+/* The actual glass display screen bezel */
+.oled-bezel {
+  background: #020408;
+  border: 4px solid #111827;
+  border-radius: 8px;
+  padding: 10px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 
+    inset 0 0 15px rgba(0, 0, 0, 0.9),
+    0 0 2px rgba(255, 255, 255, 0.1);
+}
+
+/* Glass screen gloss reflection overlay */
+.oled-bezel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 45%;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0) 100%);
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Scanline / Pixel Grid effect simulating 128x64 monochrome OLED dots */
+.oled-bezel::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%),
+              linear-gradient(90deg, rgba(255, 0, 0, 0.02), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.02));
+  background-size: 100% 2px, 3px 100%;
+  pointer-events: none;
+  z-index: 9;
+}
+
+/* The active monochrome OLED canvas (128x64 aspect ratio) */
+.oled-screen {
+  background: #030712;
+  width: 100%;
+  aspect-ratio: 128 / 64;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 8px 12px;
+  color: #38bdf8; /* Authentic ice-blue phosphor glow */
+  font-family: var(--font-mono);
+  position: relative;
+  text-shadow: 0 0 6px rgba(56, 189, 248, 0.6);
+  user-select: none;
+}
+
+/* OLED Top Status Bar */
+.oled-statusbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.68rem;
+  border-bottom: 1px solid rgba(56, 189, 248, 0.3);
+  padding-bottom: 3px;
+  line-height: 1;
+}
+
+.oled-status-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.oled-status-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+
+/* OLED Main Instruction Body */
+.oled-main-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 1;
+  padding: 4px 0;
+}
+
+/* Big Turn Maneuver Icon (SVG or Pixel Graphic) */
+.oled-icon-box {
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.oled-icon-box svg {
+  width: 44px;
+  height: 44px;
+  stroke: #38bdf8;
+  fill: none;
+  stroke-width: 2.4;
+  filter: drop-shadow(0 0 5px rgba(56, 189, 248, 0.7));
+}
+
+/* Instruction Text & Distance details */
+.oled-text-box {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.oled-distance-val {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: #e0f2fe;
+}
+
+.oled-instruction-text {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #38bdf8;
+  margin-top: 2px;
+}
+
+/* OLED Bottom Bar (Progress or Next Turn Preview) */
+.oled-bottombar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.62rem;
+  border-top: 1px solid rgba(56, 189, 248, 0.3);
+  padding-top: 3px;
+  line-height: 1;
+}
+
+.oled-progress-track {
+  width: 65%;
+  height: 5px;
+  border: 1px solid #38bdf8;
+  background: transparent;
+  padding: 1px;
+}
+
+.oled-progress-fill {
+  height: 100%;
+  width: 0%;
+  background: #38bdf8;
+  box-shadow: 0 0 4px #38bdf8;
+  transition: width 0.3s ease;
+}
+
+/* ==========================================================================
+   OLED SPECIAL OVERRIDE STATES
+   ========================================================================== */
+
+/* State: Standby / Idle */
+.oled-screen.mode-standby .oled-main-body {
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+}
+
+.oled-screen.mode-standby .standby-title {
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  margin-bottom: 4px;
+}
+
+.oled-screen.mode-standby .standby-sub {
+  font-size: 0.68rem;
+  opacity: 0.8;
+}
+
+/* State: Ultrasonic Obstacle Alert (HC-SR04 Warning) */
+.oled-screen.mode-obstacle {
+  background: #38bdf8 !important;
+  color: #020408 !important;
+  text-shadow: none !important;
+  animation: oled-strobe 0.4s infinite alternate;
+}
+
+.oled-screen.mode-obstacle svg {
+  stroke: #020408 !important;
+  filter: none !important;
+}
+
+.oled-screen.mode-obstacle .oled-statusbar,
+.oled-screen.mode-obstacle .oled-bottombar {
+  border-color: #020408 !important;
+}
+
+.oled-screen.mode-obstacle .obstacle-title {
+  font-size: 1.15rem;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  text-align: center;
+}
+
+.oled-screen.mode-obstacle .obstacle-dist {
+  font-size: 1.4rem;
+  font-weight: 900;
+  text-align: center;
+}
+
+/* State: Emergency SOS Screen */
+.oled-screen.mode-sos {
+  background: #ef4444 !important;
+  color: #ffffff !important;
+  text-shadow: 0 0 8px #ffffff !important;
+  animation: oled-sos-strobe 0.3s infinite alternate;
+}
+
+.oled-screen.mode-sos svg {
+  stroke: #ffffff !important;
+}
+
+.oled-screen.mode-sos .oled-statusbar,
+.oled-screen.mode-sos .oled-bottombar {
+  border-color: #ffffff !important;
+}
+
+@keyframes oled-strobe {
+  0% { opacity: 0.9; }
+  100% { opacity: 1; }
+}
+
+@keyframes oled-sos-strobe {
+  0% { filter: invert(0); }
+  100% { filter: invert(0.9); }
+}

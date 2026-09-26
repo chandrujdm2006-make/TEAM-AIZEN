@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Turn-by-Turn Navigation System | IoT Motorcycle Rider Assistant</title>
+  <meta name="description" content="College Mini Project II - Turn-by-Turn Navigation System for Motorcycle Rider Assistant with ESP32-C3, OLED HUD, and Web Companion Dashboard.">
+
+  <!-- Google Fonts: Outfit + JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Application Stylesheets -->
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/oled.css">
+</head>
+<body>
+
+  <!-- Top Navigation Bar -->
+  <header class="navbar">
+    <div class="brand-section">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <h1>RIDER ASSISTANT HUD</h1>
+        <div class="brand-subtitle">IoT Turn-by-Turn Navigation System &bull; Dept. of IT</div>
+      </div>
+    </div>
+
+    <nav class="nav-links">
+      <button class="nav-btn active" data-tab="tab-dashboard" id="btn-tab-dashboard">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+        Cockpit & HUD
+      </button>
+      <button class="nav-btn" data-tab="tab-setup" id="btn-tab-setup">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>
+        Trip Setup
+      </button>
+      <button class="nav-btn" data-tab="tab-history" id="btn-tab-history">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Trip History
+      </button>
+      <button class="nav-btn" data-tab="tab-emergency" id="btn-tab-emergency">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        Emergency Log
+      </button>
+      <button class="nav-btn" data-tab="tab-docs" id="btn-tab-docs">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>
+        Hardware & Pins
+      </button>
+    </nav>
+
+    <div class="nav-status-group">
+      <div class="status-badge" title="WebSocket telemetry connection">
+        <div class="status-dot" id="socket-status-dot"></div>
+        <span id="socket-status-text">LIVE SYNC</span>
+      </div>
+
+      <div class="status-badge" title="Connected IoT Microcontroller">
+        <span style="color:var(--accent-cyan);">⚡ ESP32-C3</span>
+        <span style="color:var(--accent-emerald);">98%</span>
+      </div>
+
+      <button class="audio-toggle-btn" id="audio-toggle-btn" title="Toggle audio alerts">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="main-container">
+
+    <!-- Global Emergency Alert Banner (Appears on SOS) -->
+    <div class="alert-banner" id="emergency-alert-banner">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+          <line x1="12" y1="9" x2="12" y2="13"/>
+          <line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+        <div id="emergency-banner-desc">
+          <strong>Rider Emergency SOS Active!</strong> Location pinned & notifications sent.
+        </div>
+      </div>
+      <button class="btn btn-secondary" id="btn-dismiss-emergency" style="color:white;border-color:white;background:transparent;">
+        Acknowledge
+      </button>
+    </div>
+
+    <!-- TAB 1: COCKPIT & LIVE DASHBOARD -->
+    <section class="tab-pane active" id="tab-dashboard">
+      <div class="dashboard-grid">
+        
+        <!-- Left Column: Live Map & Telemetry HUD -->
+        <div class="panel-card" id="panel-card-map">
+          <div class="panel-header">
+            <div class="panel-title">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/>
+                <line x1="8" y1="2" x2="8" y2="18"/>
+                <line x1="16" y1="6" x2="16" y2="22"/>
+              </svg>
+              Live Telemetry &amp; GPS Tracking
+            </div>
+            <div style="font-size:0.8rem;color:var(--text-muted);font-family:var(--font-mono);" id="active-trip-title">
+              Google Maps GPS Navigation
+            </div>
+          </div>
+
+          <!-- Search & Location Controls Strip -->
+          <div class="map-controls-strip">
+            <button type="button" class="btn btn-secondary" id="btn-use-current-location" title="Obtain browser GPS coordinates">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="2" x2="12" y2="6"/>
+                <line x1="12" y1="18" x2="12" y2="22"/>
+                <line x1="2" y1="12" x2="6" y2="12"/>
+                <line x1="18" y1="12" x2="22" y2="12"/>
+                <circle cx="12" cy="12" r="3" fill="currentColor"/>
+              </svg>
+              Current Location
+            </button>
+
+            <div class="destination-search-box">
+              <svg class="search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <input type="text" id="destination-input" class="form-control destination-autocomplete" placeholder="Where do you want to go?" autocomplete="off" />
+            </div>
+
+            <button type="button" class="btn btn-primary" id="btn-search-destination">
+              Search Destination
+            </button>
+          </div>
+
+          <!-- Map Status Notices (e.g. Permission denied, Calculating route, Destination reached) -->
+          <div id="map-notice-container" class="map-notice-container" style="display:none;"></div>
+
+          <!-- Google Map Container -->
+          <div class="map-wrapper" id="map-wrapper">
+            <div class="map-overlay-badge" id="map-overlay-badge">
+              <span style="color:var(--text-muted);">STATUS:</span> <strong id="hud-current-instruction">Standby - Ready for Route</strong>
+            </div>
+            <div id="map"></div>
+
+            <!-- Google Maps Not Configured Card (rendered if API key is missing) -->
+            <div id="gmaps-not-configured" class="gmaps-unconfigured-overlay" style="display:none;">
+              <div class="unconfigured-card">
+                <div class="unconfigured-icon">🗺️</div>
+                <h3>GOOGLE MAPS NOT CONFIGURED</h3>
+                <p>Add your API key to <code>.env</code> file:</p>
+                <pre class="env-snippet">VITE_GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_API_KEY</pre>
+                <div class="unconfigured-sub">Required Google Cloud APIs:</div>
+                <div class="unconfigured-api-list">
+                  <span>&bull; Maps JavaScript API</span>
+                  <span>&bull; Places API</span>
+                  <span>&bull; Directions API</span>
+                </div>
+                <div class="unconfigured-cmd">Then restart the development server: <code>npm run dev</code></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Prominent START NAVIGATION button -->
+          <div class="nav-action-bar">
+            <button type="button" class="btn btn-primary btn-large btn-start-nav" id="btn-start-navigation">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+              START NAVIGATION
+            </button>
+          </div>
+
+          <!-- Telemetry HUD Counters -->
+          <div class="telemetry-strip">
+            <div class="telemetry-item">
+              <div class="telemetry-label">Speedometer</div>
+              <div class="telemetry-val"><span id="metric-speed">--</span><span class="telemetry-unit">km/h</span></div>
+            </div>
+            <div class="telemetry-item">
+              <div class="telemetry-label">Next Turn In</div>
+              <div class="telemetry-val" style="color:var(--accent-cyan);"><span id="metric-turn-dist">--</span></div>
+            </div>
+            <div class="telemetry-item">
+              <div class="telemetry-label">Remaining Dist</div>
+              <div class="telemetry-val"><span id="metric-dest-dist">--</span></div>
+            </div>
+            <div class="telemetry-item">
+              <div class="telemetry-label">Heading / Compass</div>
+              <div class="telemetry-val"><span id="metric-heading">--°</span></div>
+            </div>
+          </div>
+
+          <!-- Trip Progress Bar -->
+          <div class="trip-progress-container">
+            <div class="progress-header">
+              <span>TRIP COMPLETION</span>
+              <span id="trip-progress-pct">0%</span>
+            </div>
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" id="trip-progress-fill"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Column: OLED Hardware Simulator & Live Controls -->
+        <div>
+          <!-- Physical SSD1306 128x64 OLED Module -->
+          <div class="panel-card" style="text-align: center;">
+            <div class="panel-header" style="justify-content:center;">
+              <div class="panel-title">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                  <line x1="8" y1="21" x2="16" y2="21"/>
+                  <line x1="12" y1="17" x2="12" y2="21"/>
+                </svg>
+                Physical SSD1306 OLED HUD Simulator (0.96" 128x64)
+              </div>
+            </div>
+
+            <!-- PCB Enclosure -->
+            <div class="oled-pcb-module">
+              <!-- 4 Corner Screws -->
+              <div class="pcb-screw top-left"></div>
+              <div class="pcb-screw top-right"></div>
+              <div class="pcb-screw bottom-left"></div>
+              <div class="pcb-screw bottom-right"></div>
+
+              <!-- Pin Headers -->
+              <div class="pcb-header-pins">
+                <div class="pin-label"><div class="pin-hole"></div><span class="pin-text">GND</span></div>
+                <div class="pin-label"><div class="pin-hole"></div><span class="pin-text">VCC</span></div>
+                <div class="pin-label"><div class="pin-hole"></div><span class="pin-text">SCL</span></div>
+                <div class="pin-label"><div class="pin-hole"></div><span class="pin-text">SDA</span></div>
+              </div>
+
+              <!-- Bezel Screen Container -->
+              <div class="oled-bezel">
+                <div class="oled-screen" id="oled-screen">
+                  <!-- Dynamically rendered by oled.js -->
+                </div>
+              </div>
+
+              <!-- Silkscreen text on PCB -->
+              <div class="pcb-silkscreen left-tag">SSD1306 I2C</div>
+              <div class="pcb-silkscreen right-tag">RIDER HUD v1.0</div>
+            </div>
+            
+            <p style="font-size:0.75rem;color:var(--text-muted);margin-top:12px;">
+              Monochrome OLED rendering turn arrows, distance countdown, speed, and hazard alerts.
+            </p>
+          </div>
+
+          <!-- Reviewer & Demo Controls Panel -->
+          <div class="panel-card">
+            <div class="panel-header">
+              <div class="panel-title">
+                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                Live Hardware Simulation Controls
+              </div>
+              <span style="font-size:0.7rem;color:var(--accent-cyan);font-family:var(--font-mono);">DEMO ENGINE</span>
+            </div>
+
+            <p style="font-size:0.78rem;color:var(--text-secondary);margin-bottom:0.75rem;">
+              Simulate full ride movements, proximity sensor detection, and physical emergency button without hardware:
+            </p>
+
+            <div class="sim-controls-grid">
+              <button class="btn btn-primary" id="btn-sim-play">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                  <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                Start Auto Ride
+              </button>
+
+              <button class="btn btn-secondary" id="btn-sim-step">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="9 18 15 12 9 6"/>
+                </svg>
+                Step 1 Waypoint
+              </button>
+
+              <button class="btn btn-warning" id="btn-sim-obstacle">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                </svg>
+                HC-SR04 Obstacle
+              </button>
+
+              <button class="btn btn-danger" id="btn-sim-sos">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+                SOS Emergency
+              </button>
+            </div>
+
+            <!-- Simulation Speed Slider -->
+            <div class="speed-control-box">
+              <div class="slider-label">
+                <span>SIMULATED VEHICLE SPEED</span>
+                <span id="sim-speed-val" style="color:var(--accent-cyan);font-weight:bold;">45 km/h</span>
+              </div>
+              <input type="range" id="sim-speed-slider" min="15" max="100" value="45" step="5">
+            </div>
+
+            <div style="margin-top:0.75rem;display:flex;justify-content:flex-end;">
+              <button class="btn btn-secondary" id="btn-sim-reset" style="font-size:0.75rem;padding:4px 10px;">
+                Reset Ride Position
+              </button>
+            </div>
+          </div>
+
+        </div>
+
+      </div>
+    </section>
+
+    <!-- TAB 2: TRIP SETUP -->
+    <section class="tab-pane" id="tab-setup">
+      <div class="form-grid">
+        
+        <!-- Preset Routes -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <div class="panel-title">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><polygon points="12 6 12 12 14 14"/>
+              </svg>
+              Quick Test Routes (Instant Pre-computed)
+            </div>
+          </div>
+
+          <p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:1rem;">
+            Select a curated route designed to demonstrate turns, roundabouts, and arrival states:
+          </p>
+
+          <div class="preset-routes-grid">
+            <div class="preset-card" data-preset="campus_to_techpark">
+              <div>
+                <div class="preset-title">Campus Hub &rarr; Innovation Tech Park</div>
+                <div class="preset-desc">City route featuring Left/Right turns, Flyover ramp, and 2nd Roundabout Exit</div>
+              </div>
+              <span class="badge badge-in-progress">4.2 km &bull; 9 Steps</span>
+            </div>
+
+            <div class="preset-card" data-preset="metro_to_hospital">
+              <div>
+                <div class="preset-title">Central Metro Station &rarr; City General Hospital</div>
+                <div class="preset-desc">Emergency corridor route featuring Arterial Way, Cross junction, and U-Turn</div>
+              </div>
+              <span class="badge badge-in-progress">1.8 km &bull; 5 Steps</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Custom Route Form -->
+        <div class="panel-card">
+          <div class="panel-header">
+            <div class="panel-title">
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+              </svg>
+              Custom Route Planner
+            </div>
+          </div>
+
+          <form id="custom-trip-form">
+            <div class="form-group">
+              <label class="form-label">Origin Location</label>
+              <input type="text" class="form-control" id="input-origin" value="MG Road Metro, Bangalore" required>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1rem;">
+              <div>
+                <label class="form-label">Origin Lat</label>
+                <input type="number" step="any" class="form-control" id="input-olat" value="12.9750">
+              </div>
+              <div>
+                <label class="form-label">Origin Lng</label>
+                <input type="number" step="any" class="form-control" id="input-olng" value="77.6050">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Destination Location</label>
+              <input type="text" class="form-control" id="input-destination" value="Indiranagar 100ft Road" required>
+            </div>
+
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1.25rem;">
+              <div>
+                <label class="form-label">Dest Lat</label>
+                <input type="number" step="any" class="form-control" id="input-dlat" value="12.9784">
+              </div>
+              <div>
+                <label class="form-label">Dest Lng</label>
+                <input type="number" step="any" class="form-control" id="input-dlng" value="77.6412">
+              </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="width:100%;">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+              </svg>
+              Calculate Route &amp; Start Trip
+            </button>
+          </form>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- TAB 3: TRIP HISTORY -->
+    <section class="tab-pane" id="tab-history">
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+            </svg>
+            Historical Trip Records (SQLite DB)
+          </div>
+          <button class="btn btn-secondary" style="font-size:0.78rem;padding:4px 10px;" onclick="app.loadTripHistory()">
+            Refresh
+          </button>
+        </div>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Trip ID</th>
+                <th>Origin</th>
+                <th>Destination</th>
+                <th>Distance</th>
+                <th>Started At</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="trip-history-tbody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 4: EMERGENCY LOG -->
+    <section class="tab-pane" id="tab-emergency">
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title" style="color:var(--accent-red);">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            Emergency SOS Incidents &amp; Dispatch Log
+          </div>
+          <button class="btn btn-secondary" style="font-size:0.78rem;padding:4px 10px;" onclick="app.loadEmergencyLogs()">
+            Refresh
+          </button>
+        </div>
+
+        <p style="font-size:0.8rem;color:var(--text-secondary);margin-bottom:1rem;">
+          Recorded when the rider triggers the hardware SOS button on the ESP32 or the companion interface. Notifications dispatched to designated guardian.
+        </p>
+
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Event #</th>
+                <th>Timestamp</th>
+                <th>Device ID</th>
+                <th>GPS Pin</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="emergency-log-tbody">
+              <!-- Dynamically populated -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 5: HARDWARE ARCHITECTURE & PINS -->
+    <section class="tab-pane" id="tab-docs">
+      <div class="panel-card">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+              <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+              <line x1="6" y1="6" x2="6.01" y2="6"/>
+              <line x1="6" y1="18" x2="6.01" y2="18"/>
+            </svg>
+            System Architecture &amp; ESP32-C3 Pinout Guide
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;font-size:0.85rem;">
+          <div>
+            <h3 style="color:var(--accent-cyan);margin-bottom:0.75rem;">1. ESP32-C3 Microcontroller Pinout</h3>
+            <div class="table-container" style="margin-bottom:1rem;">
+              <table class="data-table">
+                <thead>
+                  <tr><th>Module</th><th>ESP32-C3 Pin</th><th>Protocol / Note</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>SSD1306 OLED (SDA)</td><td>GPIO 8</td><td>I2C Data line</td></tr>
+                  <tr><td>SSD1306 OLED (SCL)</td><td>GPIO 9</td><td>I2C Clock line</td></tr>
+                  <tr><td>NEO-6M GPS (TX)</td><td>GPIO 20 (RX)</td><td>UART Serial (9600 baud)</td></tr>
+                  <tr><td>NEO-6M GPS (RX)</td><td>GPIO 21 (TX)</td><td>UART Serial</td></tr>
+                  <tr><td>HC-SR04 Trig</td><td>GPIO 2</td><td>Ultrasonic Pulse Output</td></tr>
+                  <tr><td>HC-SR04 Echo</td><td>GPIO 3</td><td>Pulse Width Input (via divider)</td></tr>
+                  <tr><td>Emergency Button</td><td>GPIO 4</td><td>Interrupt / Internal Pullup</td></tr>
+                  <tr><td>Haptic Motor / Buzzer</td><td>GPIO 5</td><td>PWM / Digital Output</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h3 style="color:var(--accent-cyan);margin-bottom:0.5rem;">2. Turn Detection Algorithm</h3>
+            <p style="color:var(--text-secondary);line-height:1.6;">
+              The backend queries the ordered sequence of route points. As the rider moves, Haversine geodesic distance computes proximity to the upcoming turn maneuver. When proximity drops below 35m, the HUD seamlessly transitions to the next turn step, providing distraction-free visual cues with distance countdown.
+            </p>
+          </div>
+
+          <div>
+            <h3 style="color:var(--accent-cyan);margin-bottom:0.75rem;">3. End-to-End IoT Data Flow</h3>
+            <div style="background:rgba(13,19,31,0.8);border:1px solid rgba(255,255,255,0.08);padding:1rem;border-radius:8px;font-family:var(--font-mono);font-size:0.75rem;line-height:1.8;color:var(--accent-cyan);">
+              [NEO-6M GPS Module]<br>
+              &nbsp;&nbsp;&darr; (NMEA Sentences over UART)<br>
+              [ESP32-C3 Microcontroller]<br>
+              &nbsp;&nbsp;&darr; (HTTP POST /api/devices/:id/location via Wi-Fi)<br>
+              [Node.js Express + SQLite Server]<br>
+              &nbsp;&nbsp;&darr; (Calculates Next Turn Instruction &amp; Distance)<br>
+              &nbsp;&nbsp;&darr; (Broadcasts via Socket.IO WebSocket)<br>
+              [Companion Web App Dashboard &amp; OLED Simulator]
+            </div>
+
+            <div style="margin-top:1.25rem;">
+              <h3 style="color:var(--accent-cyan);margin-bottom:0.5rem;">4. Safety Failsafes</h3>
+              <ul style="color:var(--text-secondary);line-height:1.6;padding-left:1.2rem;">
+                <li><strong>Proximity Override:</strong> Ultrasonic sensor readings under 100cm instantly supersede navigation to show a flashing hazard warning.</li>
+                <li><strong>One-Touch SOS:</strong> Pressing the physical handlebar button immediately dispatches GPS coordinates to emergency guardians.</li>
+                <li><strong>Zero Billing Dependency:</strong> Runs anywhere locally with mock fallback, free OSRM, or Google Maps.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Footer -->
+  <footer class="app-footer">
+    Department of Information Technology &bull; Mini Project II Prototype &bull; Turn-by-Turn Navigation Assistant
+  </footer>
+
+  <!-- Scripts -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="js/oled.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/socket-client.js"></script>
+  <script src="js/simulator.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

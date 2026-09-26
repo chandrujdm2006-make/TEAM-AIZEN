@@ -1,0 +1,83 @@
+Build a working prototype of a "Turn-by-Turn Navigation System" — an IoT project for a
+motorcycle rider assistant — including a full web frontend and a database backend.
+
+PROJECT CONTEXT
+College mini-project (Dept. of IT, Mini Project II). Goal: replace smartphone-based
+navigation with a compact hardware assistant (ESP32-C3 + GPS + OLED) to reduce rider
+distraction, with a companion web app and backend to support it.
+
+HARDWARE TARGET (for firmware code)
+- ESP32-C3 microcontroller
+- GPS module (NEO-6M or similar) for real-time location tracking
+- OLED display (SSD1306, I2C) showing only essential turn instructions
+- Wi-Fi connectivity to the backend
+- Optional: ultrasonic sensor (HC-SR04) for obstacle detection alerts
+- Optional: vibration motor for haptic turn alerts
+- Emergency button to trigger location sharing
+
+SYSTEM ARCHITECTURE (build all three layers)
+
+1. DATABASE
+   - Use SQLite for local dev simplicity (or Postgres if you want it production-like)
+   - Tables:
+     - users (id, name, emergency_contact_phone, emergency_contact_email)
+     - devices (id, user_id, device_name, last_seen_at)
+     - trips (id, user_id, device_id, origin, destination, started_at, ended_at, status)
+     - route_points (id, trip_id, sequence_no, lat, lng, instruction, distance_to_next_turn)
+     - location_logs (id, device_id, lat, lng, timestamp) — for live tracking history
+     - emergency_events (id, user_id, device_id, lat, lng, triggered_at, resolved)
+   - Include seed/migration scripts
+
+2. BACKEND (API server)
+   - Node.js + Express (or Flask if you prefer Python) exposing REST endpoints:
+     - POST /api/trips — start a trip with origin/destination, calls Google Maps
+       Directions API, stores parsed route_points in DB
+     - GET /api/trips/:id/next-instruction — returns current turn instruction based
+       on device's last known location
+     - POST /api/devices/:id/location — ESP32 posts GPS coordinates here periodically
+     - POST /api/devices/:id/emergency — triggered by the emergency button, logs an
+       emergency_event and notifies the emergency contact (email/SMS stub is fine)
+     - GET /api/devices/:id/status — for the web dashboard to poll live state
+   - Include a mock-route mode that works without a real Google Maps API key
+     (returns a canned set of route_points) so the demo doesn't depend on billing
+
+3. WEB FRONTEND (this is the part to build out fully)
+   - Framework: plain HTML/CSS/JS (or React if you want it more polished — your call,
+     default to plain HTML/CSS/JS for simplicity unless told otherwise)
+   - Pages/views:
+     a. Trip Setup page — enter origin/destination, start trip, shows a live map
+        (Google Maps JS API or Leaflet+OpenStreetMap if no API key) with the route drawn
+     b. Live Dashboard — shows the rider's current position on the map, current
+        instruction, speed, and trip progress; polls or uses WebSocket for updates
+     c. Device Simulator / OLED View — a small dark panel styled like a real OLED
+        (monospace font, high-contrast) showing only the current instruction
+        ("Turn Left in 200m", "Go Straight", "U-Turn", "Obstacle Ahead") — lets you
+        demo the rider-facing experience without physical hardware
+     d. Trip History page — lists past trips pulled from the database
+     e. Emergency Log page — lists triggered emergency_events with timestamp and location
+   - Use WebSocket (Socket.IO or similar) so the OLED-simulator view updates live as
+     location_logs come in, rather than polling
+
+4. FIRMWARE (ESP32-C3 Arduino sketch)
+   - Reads GPS via TinyGPS++
+   - Connects to Wi-Fi, POSTs location to the backend's /api/devices/:id/location endpoint
+   - Polls /api/trips/:id/next-instruction and renders it on the SSD1306 OLED
+   - HC-SR04 obstacle check overrides the display with a warning when triggered
+   - Emergency button POSTs to /api/devices/:id/emergency
+
+CONSTRAINTS
+- Must run end-to-end locally without requiring real hardware — the web Device
+  Simulator view should let you demo the full flow (trip start → live location →
+  instruction updates → emergency trigger) using a script that fakes GPS movement
+  along the route, in case hardware isn't available for the review.
+- Well-commented code — this will be shown to a project supervisor/evaluator.
+- Keep setup simple: one command to install dependencies, one to run backend+frontend,
+  one to run the GPS-simulation script.
+
+DELIVERABLES
+- /firmware — ESP32-C3 Arduino sketch(es)
+- /backend — API server + database schema/migrations + mock-route fallback
+- /frontend — web app (trip setup, live dashboard, OLED simulator, history, emergency log)
+- /scripts — GPS movement simulator for demoing without hardware
+- README.md — setup, environment variables (Google Maps API key optional), how to run
+  the full demo end-to-end

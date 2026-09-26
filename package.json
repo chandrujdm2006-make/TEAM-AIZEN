@@ -1,0 +1,29 @@
+{
+  "name": "turn-by-turn-rider-assistant",
+  "version": "1.0.0",
+  "description": "Turn-by-Turn Navigation System - IoT Motorcycle Rider Assistant (ESP32-C3 + OLED + Web Dashboard)",
+  "main": "backend/src/server.js",
+  "scripts": {
+    "start": "node backend/src/server.js",
+    "dev": "node --watch backend/src/server.js",
+    "seed": "node scripts/seed_db.js",
+    "simulate": "node scripts/simulate_ride.js"
+  },
+  "keywords": [
+    "iot",
+    "esp32-c3",
+    "turn-by-turn-navigation",
+    "motorcycle-hud",
+    "oled-ssd1306",
+    "mini-project"
+  ],
+  "author": "Dept. of IT - Mini Project II",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^18.0.4",
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.4"
+  }
+}
