@@ -1,7 +1,7 @@
 /**
  * Main Server Entry Point
  * Turn-by-Turn Navigation System (IoT Motorcycle Rider Assistant)
- * College Mini Project II - Dept. of IT - Live HUD Server
+ * College Mini Project II - Dept. of IT - Live HUD Server 2.0
  */
 
 const http = require('http');
