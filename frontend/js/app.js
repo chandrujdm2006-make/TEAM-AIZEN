@@ -87,9 +87,6 @@ class App {
     if (tabId === 'tab-dashboard' && window.navMap && window.navMap.map) {
       setTimeout(() => {
         window.navMap.map.invalidateSize();
-        if (window.navMap.currentLocation) {
-          window.navMap.map.panTo([window.navMap.currentLocation.lat, window.navMap.currentLocation.lng]);
-        }
       }, 150);
     }
   }

@@ -290,7 +290,8 @@ body {
    ========================================================================== */
 .map-wrapper {
   position: relative;
-  height: 480px;
+  height: clamp(450px, 58vh, 620px);
+  min-height: 450px;
   width: 100%;
   border-radius: var(--radius-md);
   overflow: hidden;

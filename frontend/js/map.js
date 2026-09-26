@@ -2,21 +2,16 @@
  * India-Wide OpenStreetMap & Leaflet Navigation Controller
  * Turn-by-Turn Rider Assistant - Dept. of IT
  * 
- * Features & Fixes:
- * - 100% Free & Open-Source: Leaflet + OpenStreetMap + OSRM (Zero Google API Key Required)
- * - Initial View: Entire Country of India (Zoom 5) -> auto-pans to user location when GPS granted
- * - CartoDB Dark Matter / Voyager Tile Engine: Valid tile URL without {r} bug, with tile error fallback
- * - Real OpenStreetMap Geocoding: Autocomplete across all Indian cities, colleges, hospitals, stations, airports
- * - Start Location: Browser GPS (getCurrentPosition & watchPosition) OR Manual Search
- * - Destination Location: Search & Marker Placement
- * - Real Road Route Calculation via OSRM Driving Engine with high-precision road geometry
- * - Exact Maneuver Model: STRAIGHT (↑), SLIGHT_LEFT (↖), SLIGHT_RIGHT (↗), LEFT (←), RIGHT (→),
- *   SHARP_LEFT (↰), SHARP_RIGHT (↱), U_TURN (↶), ROUNDABOUT (⟳), ARRIVED (🏁)
- * - Distinct separation: Vehicle Heading Pointer (GPS orientation) vs Next Maneuver Arrow (Road Turn)
- * - Road Segment Relative Bearing Calculation: relativeAngle = (routeBearing - currentHeading)
- * - GPS-to-route snapping, distance to next turn (countdown), and remaining distance along route
- * - Synchronized with Physical SSD1306 OLED HUD Simulator & AI Navigation Copilot
- * - Clean State Machine: IDLE -> LOCATION_READY -> DESTINATION_SELECTED -> ROUTE_READY -> NAVIGATING -> ARRIVED
+ * Camera & Navigation Control:
+ * - Persistent Leaflet Map instance (initialized ONCE, center India zoom 5)
+ * - User has 100% Camera Control (Zoom in, Zoom out, Pan freely)
+ * - Zero camera movement or zoom on normal GPS updates (marker updates ONLY)
+ * - isFollowingUser state: default false
+ * - User interaction (dragstart, zoomstart, movestart) immediately sets isFollowingUser = false & displays [ 📍 RECENTER ]
+ * - [ 📍 RECENTER ] button centers ONCE at navigation zoom (16) and re-enables follow mode
+ * - Route fitted ONCE when new route generated (hasFittedCurrentRoute flag guards all route events)
+ * - "Use My Location" centers ONCE when explicitly clicked by user
+ * - SSD1306 OLED HUD Simulator and AI Assistant synchronized with exact road maneuvers
  */
 
 // Explicit Navigation Maneuver Model
@@ -91,23 +86,26 @@ class NavigationMap {
     this.currentTileStyle = 'dark';
     this.tileErrorCount = 0;
 
+    // Follow Mode & Camera Control State
+    this.isFollowingUser = false;         // Default: false (user controls camera)
+    this.hasFittedCurrentRoute = false;   // Guards fitBounds() to run ONLY ONCE per new route
+
     // Explicit State Machine: IDLE | LOCATION_READY | DESTINATION_SELECTED | ROUTE_READY | NAVIGATING | ARRIVED | ERROR
     this.state = 'IDLE';
 
     // Navigation State
-    this.startLocation = null;     // { lat, lng, name, address }
-    this.destination = null;       // { lat, lng, name, address }
-    this.currentLocation = null;   // { lat, lng, heading, speed, accuracy }
+    this.startLocation = null;            // { lat, lng, name, address }
+    this.destination = null;              // { lat, lng, name, address }
+    this.currentLocation = null;          // { lat, lng, heading, speed, accuracy }
     this.isNavigating = false;
-    this.userPanned = false;       // user dragged map, pausing auto-follow
     this.watchId = null;
-    this.activeRoute = null;       // full route data from OSRM
-    this.routeSteps = [];          // turn-by-turn maneuver points
-    this.currentStepIndex = 0;     // index of upcoming maneuver in routeSteps
+    this.activeRoute = null;              // full route data from OSRM
+    this.routeSteps = [];                 // turn-by-turn maneuver points
+    this.currentStepIndex = 0;            // index of upcoming maneuver in routeSteps
     this.hasArrived = false;
     this.lastManeuver = null;
 
-    // Leaflet Layers
+    // Persistent Leaflet Layers
     this.startMarker = null;
     this.destMarker = null;
     this.riderMarker = null;
@@ -133,9 +131,7 @@ class NavigationMap {
     this.startSearchResults = document.getElementById('start-search-results');
     this.destSearchResults = document.getElementById('dest-search-results');
     this.startChipText = document.getElementById('start-chip-text');
-    this.startChipCoords = document.getElementById('start-chip-coords');
     this.destChipText = document.getElementById('dest-chip-text');
-    this.destChipCoords = document.getElementById('dest-chip-coords');
     this.btnCurrentLoc = document.getElementById('btn-use-current-location');
     this.btnGenerateRoute = document.getElementById('btn-generate-route');
     this.btnStartNav = document.getElementById('btn-start-navigation');
@@ -149,7 +145,7 @@ class NavigationMap {
   }
 
   /**
-   * 1. Initialize Leaflet Map centered on India
+   * 1. Initialize Leaflet Map centered on India (ONCE)
    */
   init() {
     this.initLeafletMap();
@@ -157,7 +153,7 @@ class NavigationMap {
     this.initSearchAutocomplete();
     this.setState('IDLE');
 
-    // Automatically check for GPS on startup (graceful fallback if denied)
+    // Silent background check for GPS on startup (does NOT move or zoom map)
     this.requestCurrentLocation(false);
   }
 
@@ -171,7 +167,11 @@ class NavigationMap {
       return;
     }
 
-    // Configure Leaflet default image asset path
+    if (this.map) {
+      console.log('[Map] Map already initialized, keeping persistent instance.');
+      return;
+    }
+
     L.Icon.Default.imagePath = 'vendor/leaflet/images/';
 
     // Center of India: Lat ~20.5937, Lng ~78.9629. Zoom: 5 covers India from Kashmir to Kanyakumari
@@ -215,17 +215,29 @@ class NavigationMap {
       // Add initial dark HUD layer
       this.tileLayers.dark.addTo(this.map);
 
-      // Detect user map drag to pause auto-follow
+      // User interaction detection: immediately stop follow mode and show RECENTER button
       this.map.on('dragstart', () => {
-        if (this.isNavigating) {
-          this.userPanned = true;
-          if (this.btnRecenter) {
-            this.btnRecenter.classList.add('visible');
-          }
+        this.isFollowingUser = false;
+        this.showRecenterButton(true);
+        console.log('[MAP] user moved map (dragstart)');
+      });
+
+      this.map.on('zoomstart', () => {
+        this.isFollowingUser = false;
+        this.showRecenterButton(true);
+        console.log('[MAP] zoom changed (zoomstart)');
+      });
+
+      this.map.on('movestart', (e) => {
+        // If this movement was triggered by a user gesture, disable follow mode
+        if (e && e.originalEvent) {
+          this.isFollowingUser = false;
+          this.showRecenterButton(true);
+          console.log('[MAP] user moved map (movestart)');
         }
       });
 
-      // Ensure proper container sizing after DOM layout
+      // Invalidate size once after DOM mount
       setTimeout(() => {
         if (this.map) {
           this.map.invalidateSize();
@@ -236,7 +248,7 @@ class NavigationMap {
         if (this.map) this.map.invalidateSize();
       });
 
-      console.log('[Map] India-Wide Leaflet Map initialized successfully (Coverage: India, Zoom: 5)');
+      console.log('[MAP] initialized: India-Wide interactive Leaflet map ready');
     } catch (err) {
       console.error('[Map] Leaflet initialization error:', err);
       this.showMapConnectionError();
@@ -273,7 +285,7 @@ class NavigationMap {
     // Current Location button (📍 USE MY LOCATION)
     if (this.btnCurrentLoc) {
       this.btnCurrentLoc.addEventListener('click', () => {
-        this.requestCurrentLocation(true);
+        this.requestCurrentLocation(true); // User-initiated: center map ONCE
       });
     }
 
@@ -298,18 +310,16 @@ class NavigationMap {
       });
     }
 
-    // Floating Map Controls: Recenter, Fit Route, Tile Style
+    // Recenter Button: Centers map ONCE on user and re-enables follow mode
     if (this.btnRecenter) {
       this.btnRecenter.addEventListener('click', () => {
-        this.userPanned = false;
-        this.btnRecenter.classList.remove('visible');
-        this.centerOnRider();
+        this.recenterOnRider();
       });
     }
 
     const btnFit = document.getElementById('btn-map-fit');
     if (btnFit) {
-      btnFit.addEventListener('click', () => this.fitRouteBounds());
+      btnFit.addEventListener('click', () => this.fitRouteBoundsManually());
     }
 
     const btnTiles = document.getElementById('btn-map-tiles');
@@ -340,6 +350,31 @@ class NavigationMap {
         this.destSearchResults.style.display = 'none';
       }
     });
+  }
+
+  showRecenterButton(show) {
+    if (!this.btnRecenter) return;
+    if (show) {
+      this.btnRecenter.classList.add('visible');
+    } else {
+      this.btnRecenter.classList.remove('visible');
+    }
+  }
+
+  recenterOnRider() {
+    if (!this.map) return;
+    if (this.currentLocation) {
+      console.log('[MAP] recenter clicked');
+      // Center ONCE at navigation zoom (16)
+      this.map.setView([this.currentLocation.lat, this.currentLocation.lng], 16, { animate: true });
+      this.isFollowingUser = true;
+      this.showRecenterButton(false);
+    } else if (this.startLocation) {
+      this.map.setView([this.startLocation.lat, this.startLocation.lng], 15, { animate: true });
+      this.showRecenterButton(false);
+    } else {
+      this.showNotice('Current location unavailable.', 'warning', 3000);
+    }
   }
 
   toggleTileStyle() {
@@ -373,7 +408,7 @@ class NavigationMap {
 
         this.startSearchTimer = setTimeout(() => {
           this.executeGeocodeSearch(query, this.startSearchResults, (selected) => {
-            this.setStartLocation(selected);
+            this.setStartLocation(selected, true);
             this.startInput.value = selected.name;
             this.startSearchResults.style.display = 'none';
           });
@@ -387,7 +422,7 @@ class NavigationMap {
       });
     }
 
-    // Destination Location Search Input (Top prominent search)
+    // Destination Location Search Input
     if (this.destInput && this.destSearchResults) {
       this.destInput.addEventListener('input', (e) => {
         clearTimeout(this.destSearchTimer);
@@ -458,7 +493,7 @@ class NavigationMap {
   /**
    * 4. Start Location Handling
    */
-  setStartLocation(location) {
+  setStartLocation(location, centerOnce = false) {
     this.startLocation = {
       lat: location.lat,
       lng: location.lng,
@@ -467,43 +502,36 @@ class NavigationMap {
     };
 
     if (this.startChipText) {
-      this.startChipText.innerText = `📍 ${this.startLocation.name}`;
-    }
-    if (this.startChipCoords) {
-      this.startChipCoords.innerText = `${this.startLocation.lat.toFixed(4)}, ${this.startLocation.lng.toFixed(4)}`;
+      this.startChipText.innerText = `📍 Start: ${this.startLocation.name}`;
     }
 
-    // Place Start Marker
-    if (this.startMarker && this.map) {
-      this.map.removeLayer(this.startMarker);
-    }
+    // Place or move Start Marker
+    if (this.startMarker) {
+      this.startMarker.setLatLng([this.startLocation.lat, this.startLocation.lng]);
+    } else if (this.map) {
+      const startIcon = L.divIcon({
+        className: 'custom-start-icon',
+        html: `<div class="hud-start-marker" title="${this.startLocation.name}">A</div>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
+      });
 
-    const startIcon = L.divIcon({
-      className: 'custom-start-icon',
-      html: `<div class="hud-start-marker" title="${this.startLocation.name}">A</div>`,
-      iconSize: [28, 28],
-      iconAnchor: [14, 14]
-    });
-
-    if (this.map) {
       this.startMarker = L.marker([this.startLocation.lat, this.startLocation.lng], {
         icon: startIcon,
         title: `Start: ${this.startLocation.name}`
       }).addTo(this.map);
-
-      this.startMarker.bindPopup(`<strong>Start Location</strong><br>${this.startLocation.name}<br><small>${this.startLocation.address}</small>`);
     }
 
-    // If destination not chosen yet, pan to start
-    if (!this.destination && this.map) {
-      this.map.setView([this.startLocation.lat, this.startLocation.lng], 13);
+    // Only center if explicitly requested by user click
+    if (centerOnce && this.map) {
+      this.map.setView([this.startLocation.lat, this.startLocation.lng], 14, { animate: true });
     }
 
     this.setState('LOCATION_READY');
-    this.showNotice(`Start location set: ${this.startLocation.name}`, 'info', 2500);
 
-    // If destination is already set, automatically calculate route
+    // If destination is already set, reset flag and recalculate route
     if (this.destination) {
+      this.hasFittedCurrentRoute = false;
       this.calculateAndDisplayRoute();
     }
   }
@@ -520,35 +548,28 @@ class NavigationMap {
     };
 
     if (this.destChipText) {
-      this.destChipText.innerText = `🏁 ${this.destination.name}`;
-    }
-    if (this.destChipCoords) {
-      this.destChipCoords.innerText = `${this.destination.lat.toFixed(4)}, ${this.destination.lng.toFixed(4)}`;
+      this.destChipText.innerText = `🏁 Destination: ${this.destination.name}`;
     }
 
-    // Place Destination Marker
-    if (this.destMarker && this.map) {
-      this.map.removeLayer(this.destMarker);
-    }
+    // Place or move Destination Marker
+    if (this.destMarker) {
+      this.destMarker.setLatLng([this.destination.lat, this.destination.lng]);
+    } else if (this.map) {
+      const destIcon = L.divIcon({
+        className: 'custom-dest-icon',
+        html: `
+          <div class="hud-dest-marker" title="${this.destination.name}">
+            <div class="hud-dest-pin"><span>🏁</span></div>
+          </div>
+        `,
+        iconSize: [32, 40],
+        iconAnchor: [16, 36]
+      });
 
-    const destIcon = L.divIcon({
-      className: 'custom-dest-icon',
-      html: `
-        <div class="hud-dest-marker" title="${this.destination.name}">
-          <div class="hud-dest-pin"><span>🏁</span></div>
-        </div>
-      `,
-      iconSize: [32, 40],
-      iconAnchor: [16, 36]
-    });
-
-    if (this.map) {
       this.destMarker = L.marker([this.destination.lat, this.destination.lng], {
         icon: destIcon,
         title: `Destination: ${this.destination.name}`
       }).addTo(this.map);
-
-      this.destMarker.bindPopup(`<strong>🏁 Destination</strong><br>${this.destination.name}<br><small>${this.destination.address}</small>`);
     }
 
     const titleEl = document.getElementById('active-trip-title');
@@ -556,21 +577,15 @@ class NavigationMap {
       titleEl.innerText = `To: ${this.destination.name}`;
     }
 
+    // Reset route fit flag for new destination
+    this.hasFittedCurrentRoute = false;
     this.setState('DESTINATION_SELECTED');
     this.showNotice(`Destination selected: ${this.destination.name}`, 'info', 2500);
 
     // If start location is ready, generate route automatically
     if (this.startLocation) {
-      const bounds = L.latLngBounds(
-        [this.startLocation.lat, this.startLocation.lng],
-        [this.destination.lat, this.destination.lng]
-      );
-      if (this.map) {
-        this.map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
-      }
       this.calculateAndDisplayRoute();
-    } else if (this.map) {
-      this.map.setView([this.destination.lat, this.destination.lng], 13);
+    } else {
       this.showNotice('Please click 📍 USE MY LOCATION or select your start location to generate the route.', 'info', 4000);
     }
   }
@@ -580,7 +595,7 @@ class NavigationMap {
    */
   requestCurrentLocation(isUserInitiated = true) {
     if (!navigator.geolocation) {
-      this.showNotice('Geolocation is not supported by your browser.', 'error');
+      if (isUserInitiated) this.showNotice('Geolocation is not supported by your browser.', 'error');
       return;
     }
 
@@ -597,10 +612,14 @@ class NavigationMap {
         const accuracy = pos.coords.accuracy || 0;
 
         this.currentLocation = { lat, lng, speed: speedKmh, heading: headingDeg, accuracy };
-        console.log('[Map] Acquired live GPS location:', this.currentLocation);
 
         // Update Rider Marker on Map
         this.updateRiderPosition(lat, lng, headingDeg, speedKmh);
+
+        // Center map ONCE ONLY if user explicitly clicked "Use My Location"
+        if (isUserInitiated && this.map) {
+          this.map.setView([lat, lng], 15, { animate: true });
+        }
 
         // Reverse geocode to get real place/street name in India
         let placeName = `Current Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
@@ -616,13 +635,13 @@ class NavigationMap {
           console.warn('[Map] Reverse geocode lookup note:', e.message);
         }
 
-        // Set as Start Location
+        // Set as Start Location (without forced camera recenter)
         this.setStartLocation({
           lat,
           lng,
           name: placeName,
           address: placeAddr
-        });
+        }, false);
 
         if (this.startInput) {
           this.startInput.value = placeName;
@@ -635,7 +654,7 @@ class NavigationMap {
       (err) => {
         console.warn('[Map] Geolocation error:', err.message);
         if (err.code === 1) { // PERMISSION_DENIED
-          this.showNotice('Location permission is required for live navigation. You can select your location manually using the search box.', 'warning', 6000);
+          if (isUserInitiated) this.showNotice('Location permission is required for live navigation. You can select your location manually using the search box.', 'warning', 6000);
         } else if (isUserInitiated) {
           this.showNotice('GPS signal unavailable. Please select your location manually.', 'warning', 6000);
         }
@@ -666,7 +685,6 @@ class NavigationMap {
     this.showNotice(`Calculating road route: ${this.startLocation.name} → ${this.destination.name}...`, 'info');
     if (this.hudInstruction) this.hudInstruction.innerText = 'Calculating OSRM Road Route...';
 
-    // Disable duplicate route requests while loading
     if (this.btnGenerateRoute) this.btnGenerateRoute.disabled = true;
 
     try {
@@ -690,9 +708,9 @@ class NavigationMap {
 
       this.activeRoute = data;
       this.routeSteps = data.steps;
-      // Start with step 1 (the first upcoming turn maneuver) if steps > 1, else step 0
       this.currentStepIndex = this.routeSteps.length > 1 ? 1 : 0;
       this.hasArrived = false;
+      this.hasFittedCurrentRoute = false; // Reset so new route fits ONCE
 
       // Draw real road polyline onto Leaflet map
       this.drawRoute(this.routeSteps, data.geometry);
@@ -788,15 +806,6 @@ class NavigationMap {
   drawRoute(points, geometry = null) {
     if (!this.map || !points || points.length === 0) return;
 
-    if (this.routePolyline) {
-      this.map.removeLayer(this.routePolyline);
-      this.routePolyline = null;
-    }
-    if (this.routeGlowPolyline) {
-      this.map.removeLayer(this.routeGlowPolyline);
-      this.routeGlowPolyline = null;
-    }
-
     let latLngs = [];
     if (geometry && geometry.coordinates && Array.isArray(geometry.coordinates)) {
       // GeoJSON is [lng, lat], Leaflet is [lat, lng]
@@ -805,31 +814,46 @@ class NavigationMap {
       latLngs = points.map(p => [p.lat, p.lng]);
     }
 
-    // Outer glow casing
-    this.routeGlowPolyline = L.polyline(latLngs, {
-      color: '#0284c7',
-      weight: 8,
-      opacity: 0.45,
-      lineCap: 'round',
-      lineJoin: 'round'
-    }).addTo(this.map);
+    // Reuse existing polylines if available
+    if (this.routeGlowPolyline) {
+      this.routeGlowPolyline.setLatLngs(latLngs);
+    } else {
+      this.routeGlowPolyline = L.polyline(latLngs, {
+        color: '#0284c7',
+        weight: 8,
+        opacity: 0.45,
+        lineCap: 'round',
+        lineJoin: 'round'
+      }).addTo(this.map);
+    }
 
-    // Inner bright cyan road line
-    this.routePolyline = L.polyline(latLngs, {
-      color: '#00f0ff',
-      weight: 5,
-      opacity: 0.95,
-      lineCap: 'round',
-      lineJoin: 'round'
-    }).addTo(this.map);
+    if (this.routePolyline) {
+      this.routePolyline.setLatLngs(latLngs);
+    } else {
+      this.routePolyline = L.polyline(latLngs, {
+        color: '#00f0ff',
+        weight: 5,
+        opacity: 0.95,
+        lineCap: 'round',
+        lineJoin: 'round'
+      }).addTo(this.map);
+    }
 
-    this.fitRouteBounds();
+    // Fit route bounds ONCE for the newly calculated route
+    if (!this.hasFittedCurrentRoute && this.routePolyline) {
+      this.map.fitBounds(this.routePolyline.getBounds(), {
+        padding: [40, 40],
+        maxZoom: 16
+      });
+      this.hasFittedCurrentRoute = true;
+      console.log('[MAP] route fitted (once)');
+    }
   }
 
-  fitRouteBounds() {
+  fitRouteBoundsManually() {
     if (this.routePolyline && this.map) {
       this.map.fitBounds(this.routePolyline.getBounds(), {
-        padding: [45, 45],
+        padding: [40, 40],
         maxZoom: 16
       });
     }
@@ -845,8 +869,17 @@ class NavigationMap {
     }
 
     this.isNavigating = true;
-    this.userPanned = false;
     this.hasArrived = false;
+
+    // Set initial navigation camera ONCE if current location is known
+    if (this.currentLocation && this.map) {
+      this.map.setView([this.currentLocation.lat, this.currentLocation.lng], 16, { animate: true });
+      this.isFollowingUser = true;
+      this.showRecenterButton(false);
+    } else {
+      this.isFollowingUser = false;
+    }
+
     this.setState('NAVIGATING');
     this.showNotice('🚀 Navigation active! Follow the turn-by-turn guidance.', 'success', 3000);
 
@@ -877,6 +910,7 @@ class NavigationMap {
 
   stopNavigation() {
     this.isNavigating = false;
+    this.isFollowingUser = false;
 
     if (this.watchId !== null) {
       navigator.geolocation.clearWatch(this.watchId);
@@ -890,6 +924,7 @@ class NavigationMap {
 
   /**
    * 10. Rider Position Update (Called by GPS, Simulator, or ESP32 telemetry)
+   * CRITICAL RULE: Normal GPS updates update the marker ONLY. NO setView/fitBounds/setZoom!
    */
   updateRiderPosition(lat, lng, heading = null, speed = null) {
     if (!this.map) return;
@@ -909,7 +944,7 @@ class NavigationMap {
 
     this.currentLocation = { lat, lng, heading: computedHeading, speed };
 
-    // Update Rider Marker with directional heading pointer
+    // Update Rider Marker position and orientation (Create once, then setLatLng)
     if (!this.riderMarker) {
       const riderIcon = L.divIcon({
         className: 'custom-rider-icon',
@@ -934,9 +969,15 @@ class NavigationMap {
       }
     }
 
-    // Auto-center map if navigating and user hasn't panned
-    if (this.isNavigating && !this.userPanned) {
-      this.map.panTo([lat, lng], { animate: true, duration: 0.5 });
+    // CAMERA RULE: ONLY pan if in active navigation AND user has NOT moved the map
+    // Does NOT change zoom level!
+    if (this.isNavigating && this.isFollowingUser) {
+      const center = this.map.getCenter();
+      const distFromCenter = this.calculateHaversineMeters(center.lat, center.lng, lat, lng);
+      // Only pan when rider moves significantly away from center (> 25m) to avoid animation thrashing
+      if (distFromCenter > 25) {
+        this.map.panTo([lat, lng], { animate: true, duration: 0.6 });
+      }
     }
 
     // Update Speedometer
@@ -958,14 +999,6 @@ class NavigationMap {
     // If active route is loaded, compute turn step progress
     if (this.routeSteps && this.routeSteps.length > 0) {
       this.evaluateTurnProgress(lat, lng, computedHeading, speed);
-    }
-  }
-
-  centerOnRider() {
-    if (this.currentLocation && this.map) {
-      this.map.panTo([this.currentLocation.lat, this.currentLocation.lng], { animate: true });
-    } else if (this.startLocation && this.map) {
-      this.map.panTo([this.startLocation.lat, this.startLocation.lng], { animate: true });
     }
   }
 
@@ -1117,29 +1150,23 @@ class NavigationMap {
 
   /**
    * 12. Maneuver Model & Relative Direction Determination
-   * Uses OSRM maneuver type + route segment bearing relative to vehicle heading
    */
   determineManeuver(step, currentPos, currentHeading) {
     if (!step) return MANEUVER_MODELS.STRAIGHT;
 
-    // Check arrival
     if (step.raw_type === 'arrive' || step.maneuver_type === 'arrive') {
       return MANEUVER_MODELS.ARRIVED;
     }
 
-    // Roundabout
     if (step.raw_type === 'roundabout' || step.raw_type === 'rotary' || step.maneuver_type === 'roundabout') {
       return MANEUVER_MODELS.ROUNDABOUT;
     }
 
-    // Calculate bearing from current position to maneuver point
     const routeBearing = this.calculateBearing(currentPos.lat, currentPos.lng, step.lat, step.lng);
 
-    // If heading is available (moving), compute relative angle
     if (currentHeading !== null && currentHeading !== undefined && !isNaN(currentHeading)) {
       const relAngle = this.calculateRelativeAngle(routeBearing, currentHeading);
 
-      // Classify maneuver based on relative turn angle
       if (Math.abs(relAngle) <= 20) {
         return MANEUVER_MODELS.STRAIGHT;
       } else if (relAngle > 20 && relAngle <= 65) {
@@ -1159,7 +1186,6 @@ class NavigationMap {
       }
     }
 
-    // Fallback: match from OSRM step maneuver_type
     switch (step.maneuver_type) {
       case 'turn-left': return MANEUVER_MODELS.LEFT;
       case 'turn-right': return MANEUVER_MODELS.RIGHT;
@@ -1204,6 +1230,7 @@ class NavigationMap {
   triggerDestinationReached() {
     this.hasArrived = true;
     this.isNavigating = false;
+    this.isFollowingUser = false;
 
     if (this.watchId !== null) {
       navigator.geolocation.clearWatch(this.watchId);
@@ -1248,7 +1275,6 @@ class NavigationMap {
 
   /**
    * 15. Explicit State Machine Transition
-   * IDLE | LOCATION_READY | DESTINATION_SELECTED | ROUTE_READY | NAVIGATING | ARRIVED | ERROR
    */
   setState(newState) {
     this.state = newState;
