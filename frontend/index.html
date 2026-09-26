@@ -11,6 +11,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
+  <!-- Leaflet CSS for India-Wide Interactive OpenStreetMap -->
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
   <!-- Application Stylesheets -->
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/oled.css">
@@ -56,14 +60,20 @@
     </nav>
 
     <div class="nav-status-group">
+      <!-- Mode Selector: Simple Mode vs Advanced Mode -->
+      <div class="mode-toggle-group" id="nav-mode-selector" title="Switch UI View Mode">
+        <button type="button" class="mode-btn active" id="btn-mode-simple" data-mode="simple">⚡ SIMPLE</button>
+        <button type="button" class="mode-btn" id="btn-mode-advanced" data-mode="advanced">⚙️ ADVANCED</button>
+      </div>
+
       <div class="status-badge" title="WebSocket telemetry connection">
         <div class="status-dot" id="socket-status-dot"></div>
         <span id="socket-status-text">LIVE SYNC</span>
       </div>
 
-      <div class="status-badge" title="Connected IoT Microcontroller">
-        <span style="color:var(--accent-cyan);">⚡ ESP32-C3</span>
-        <span style="color:var(--accent-emerald);">98%</span>
+      <div class="status-badge" id="esp32-status-badge" title="IoT Microcontroller Hardware Sync">
+        <span style="color:var(--accent-cyan);" id="esp32-badge-text">⚡ ESP32-C3</span>
+        <span style="color:var(--accent-emerald);" id="esp32-battery-text">98%</span>
       </div>
 
       <button class="audio-toggle-btn" id="audio-toggle-btn" title="Toggle audio alerts">
@@ -97,9 +107,37 @@
 
     <!-- TAB 1: COCKPIT & LIVE DASHBOARD -->
     <section class="tab-pane active" id="tab-dashboard">
+      <!-- Step-by-Step Navigation Workflow Indicator -->
+      <div class="nav-steps-flow">
+        <div class="step-item active" id="flow-step-1">
+          <span class="step-num">1</span>
+          <span>📍 Start Location</span>
+        </div>
+        <div class="step-divider"></div>
+        <div class="step-item" id="flow-step-2">
+          <span class="step-num">2</span>
+          <span>🎯 Destination</span>
+        </div>
+        <div class="step-divider"></div>
+        <div class="step-item" id="flow-step-3">
+          <span class="step-num">3</span>
+          <span>🛣️ Route</span>
+        </div>
+        <div class="step-divider"></div>
+        <div class="step-item" id="flow-step-4">
+          <span class="step-num">4</span>
+          <span>🚀 Navigation</span>
+        </div>
+        <div class="step-divider"></div>
+        <div class="step-item" id="flow-step-5">
+          <span class="step-num">5</span>
+          <span>🏁 Arrival</span>
+        </div>
+      </div>
+
       <div class="dashboard-grid">
         
-        <!-- Left Column: Live Map & Telemetry HUD -->
+        <!-- Main Column: India-Wide Map & Navigation HUD -->
         <div class="panel-card" id="panel-card-map">
           <div class="panel-header">
             <div class="panel-title">
@@ -108,76 +146,111 @@
                 <line x1="8" y1="2" x2="8" y2="18"/>
                 <line x1="16" y1="6" x2="16" y2="22"/>
               </svg>
-              Live Telemetry &amp; GPS Tracking
+              India-Wide Live Navigation (OpenStreetMap &amp; OSRM)
             </div>
             <div style="font-size:0.8rem;color:var(--text-muted);font-family:var(--font-mono);" id="active-trip-title">
-              Google Maps GPS Navigation
+              OpenStreetMap India Road Network
             </div>
           </div>
 
-          <!-- Search & Location Controls Strip -->
-          <div class="map-controls-strip">
-            <button type="button" class="btn btn-secondary" id="btn-use-current-location" title="Obtain browser GPS coordinates">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="12" y1="2" x2="12" y2="6"/>
-                <line x1="12" y1="18" x2="12" y2="22"/>
-                <line x1="2" y1="12" x2="6" y2="12"/>
-                <line x1="18" y1="12" x2="22" y2="12"/>
-                <circle cx="12" cy="12" r="3" fill="currentColor"/>
-              </svg>
-              Current Location
-            </button>
-
-            <div class="destination-search-box">
-              <svg class="search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                <circle cx="11" cy="11" r="8"/>
-                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
-              </svg>
-              <input type="text" id="destination-input" class="form-control destination-autocomplete" placeholder="Where do you want to go?" autocomplete="off" />
+          <!-- Start Location & Destination Search Boxes -->
+          <div class="location-inputs-grid">
+            <!-- Start Location Input Card -->
+            <div class="location-input-card">
+              <div class="location-card-header">
+                <span class="location-card-title">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg>
+                  1. Start Location
+                </span>
+                <div style="display:flex;gap:4px;">
+                  <button type="button" class="btn btn-secondary" id="btn-use-current-location" style="padding:2px 8px;font-size:0.7rem;" title="Obtain browser GPS coordinates">
+                    📍 My GPS
+                  </button>
+                </div>
+              </div>
+              <input type="text" id="start-input" class="form-control" placeholder="Search starting city/place in India..." autocomplete="off" />
+              <div id="start-search-results" class="search-dropdown-results"></div>
+              <div class="location-chip-info" id="start-chip-info">
+                <span id="start-chip-text">📍 Standby - Ready for Location</span>
+                <span id="start-chip-coords" style="font-size:0.65rem;opacity:0.8;"></span>
+              </div>
             </div>
 
-            <button type="button" class="btn btn-primary" id="btn-search-destination">
-              Search Destination
+            <!-- Destination Location Input Card -->
+            <div class="location-input-card">
+              <div class="location-card-header">
+                <span class="location-card-title">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7"/></svg>
+                  2. Destination
+                </span>
+                <span style="font-size:0.68rem;color:var(--accent-cyan);font-family:var(--font-mono);">INDIA-WIDE</span>
+              </div>
+              <input type="text" id="destination-input" class="form-control" placeholder="Search any place in India (Coimbatore, Chennai Central, SREC, Hospital)..." autocomplete="off" />
+              <div id="dest-search-results" class="search-dropdown-results"></div>
+              <div class="location-chip-info" id="dest-chip-info">
+                <span id="dest-chip-text">🏁 Where do you want to go?</span>
+                <span id="dest-chip-coords" style="font-size:0.65rem;opacity:0.8;"></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Navigation Action Bar (Generate Route & Start/Stop) -->
+          <div style="display:flex;gap:10px;margin-bottom:1rem;flex-wrap:wrap;">
+            <button type="button" class="btn btn-secondary btn-large" id="btn-generate-route" style="flex:1;min-width:180px;">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+              GENERATE ROUTE
+            </button>
+            <button type="button" class="btn btn-primary btn-large btn-start-nav" id="btn-start-navigation" style="flex:1.2;min-width:200px;">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              START NAVIGATION
+            </button>
+            <button type="button" class="btn btn-danger btn-large" id="btn-stop-navigation" style="display:none;padding:0.75rem 1.25rem;">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+              Stop
             </button>
           </div>
 
-          <!-- Map Status Notices (e.g. Permission denied, Calculating route, Destination reached) -->
+          <!-- Map Status Notices (GPS failure, Route failure, Search alerts) -->
           <div id="map-notice-container" class="map-notice-container" style="display:none;"></div>
 
-          <!-- Google Map Container -->
+          <!-- Leaflet Map Container -->
           <div class="map-wrapper" id="map-wrapper">
             <div class="map-overlay-badge" id="map-overlay-badge">
               <span style="color:var(--text-muted);">STATUS:</span> <strong id="hud-current-instruction">Standby - Ready for Route</strong>
             </div>
             <div id="map"></div>
 
-            <!-- Google Maps Not Configured Card (rendered if API key is missing) -->
-            <div id="gmaps-not-configured" class="gmaps-unconfigured-overlay" style="display:none;">
-              <div class="unconfigured-card">
-                <div class="unconfigured-icon">🗺️</div>
-                <h3>GOOGLE MAPS NOT CONFIGURED</h3>
-                <p>Add your API key to <code>.env</code> file:</p>
-                <pre class="env-snippet">VITE_GOOGLE_MAPS_API_KEY=YOUR_GOOGLE_MAPS_API_KEY</pre>
-                <div class="unconfigured-sub">Required Google Cloud APIs:</div>
-                <div class="unconfigured-api-list">
-                  <span>&bull; Maps JavaScript API</span>
-                  <span>&bull; Places API</span>
-                  <span>&bull; Directions API</span>
-                </div>
-                <div class="unconfigured-cmd">Then restart the development server: <code>npm run dev</code></div>
-              </div>
+            <!-- Floating map controls -->
+            <div class="map-floating-controls">
+              <button type="button" class="map-floating-btn" id="btn-map-recenter" title="Center map on current position">
+                🎯 Recenter
+              </button>
+              <button type="button" class="map-floating-btn" id="btn-map-fit" title="Fit full route in view">
+                🗺️ Fit Route
+              </button>
+              <button type="button" class="map-floating-btn" id="btn-map-tiles" title="Toggle Dark/Standard tiles">
+                🌓 Style
+              </button>
             </div>
           </div>
 
-          <!-- Prominent START NAVIGATION button -->
-          <div class="nav-action-bar">
-            <button type="button" class="btn btn-primary btn-large btn-start-nav" id="btn-start-navigation">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5">
-                <polygon points="5 3 19 12 5 21 5 3"/>
-              </svg>
-              START NAVIGATION
-            </button>
+          <!-- Upgraded Next Turn Card -->
+          <div class="next-turn-card" id="next-turn-card">
+            <div class="next-turn-icon-wrap" id="hud-turn-icon">
+              <svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </div>
+            <div class="next-turn-details">
+              <div class="next-turn-header">
+                <span class="next-turn-badge" id="hud-maneuver-label">NEXT TURN: STANDBY</span>
+                <span class="next-turn-distance" id="hud-turn-distance-big">-- m</span>
+              </div>
+              <div class="next-turn-instruction" id="hud-turn-instruction-text">
+                Select your origin &amp; destination in India to generate real road route
+              </div>
+              <div class="next-turn-sub" id="hud-turn-sub-text">
+                Real OpenStreetMap Highways • OSRM Navigation Engine
+              </div>
+            </div>
           </div>
 
           <!-- Telemetry HUD Counters -->
@@ -195,8 +268,8 @@
               <div class="telemetry-val"><span id="metric-dest-dist">--</span></div>
             </div>
             <div class="telemetry-item">
-              <div class="telemetry-label">Heading / Compass</div>
-              <div class="telemetry-val"><span id="metric-heading">--°</span></div>
+              <div class="telemetry-label">ETA / Compass</div>
+              <div class="telemetry-val" style="font-size:1.15rem;"><span id="metric-eta">--</span> <span style="font-size:0.8rem;color:var(--text-muted);" id="metric-heading">--°</span></div>
             </div>
           </div>
 
@@ -210,10 +283,44 @@
               <div class="progress-bar-fill" id="trip-progress-fill"></div>
             </div>
           </div>
+
+          <!-- AI Navigation Guide Panel -->
+          <div class="ai-guide-panel" id="ai-guide-panel">
+            <div class="ai-header">
+              <div class="ai-badge">
+                <div class="ai-status-pulse"></div>
+                <span>🤖 AI NAVIGATION GUIDE</span>
+              </div>
+              <span style="font-size:0.7rem;color:var(--accent-cyan);font-family:var(--font-mono);">VOICE &amp; ROUTE COPILOT</span>
+            </div>
+
+            <!-- Dynamic AI Guidance Bubble -->
+            <div class="ai-speech-bubble" id="ai-speech-bubble">
+              "Welcome to Rider Assistant HUD. Search any place in India or use your GPS location to calculate your road route."
+            </div>
+
+            <!-- Quick Action Buttons -->
+            <div class="ai-quick-actions">
+              <button type="button" class="ai-quick-btn" data-action="where_am_i">📍 WHERE AM I?</button>
+              <button type="button" class="ai-quick-btn" data-action="next_turn">↪️ WHAT IS MY NEXT TURN?</button>
+              <button type="button" class="ai-quick-btn" data-action="how_far">📏 HOW FAR IS LEFT?</button>
+              <button type="button" class="ai-quick-btn" data-action="explain_route">🗺️ EXPLAIN MY ROUTE</button>
+              <button type="button" class="ai-quick-btn" data-action="find_nearby">🏥 FIND NEARBY</button>
+            </div>
+
+            <!-- AI Natural Language Input Form -->
+            <form id="ai-chat-form" class="ai-chat-input-bar">
+              <input type="text" id="ai-chat-input" class="ai-chat-input" placeholder="Ask AI: e.g. 'Take me to Chennai airport', 'Where am I?'..." autocomplete="off" />
+              <button type="submit" class="btn btn-secondary" style="padding:6px 14px;font-size:0.78rem;">
+                Ask AI
+              </button>
+            </form>
+          </div>
+
         </div>
 
         <!-- Right Column: OLED Hardware Simulator & Live Controls -->
-        <div>
+        <div class="advanced-panel">
           <!-- Physical SSD1306 128x64 OLED Module -->
           <div class="panel-card" style="text-align: center;">
             <div class="panel-header" style="justify-content:center;">
@@ -572,11 +679,20 @@
   </footer>
 
   <!-- Scripts -->
+  <script src="vendor/leaflet/leaflet.js"></script>
+  <script>
+    if (typeof L === 'undefined') {
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+      document.head.appendChild(s);
+    }
+  </script>
   <script src="/socket.io/socket.io.js"></script>
   <script src="js/oled.js"></script>
   <script src="js/map.js"></script>
   <script src="js/socket-client.js"></script>
   <script src="js/simulator.js"></script>
+  <script src="js/ai-assistant.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

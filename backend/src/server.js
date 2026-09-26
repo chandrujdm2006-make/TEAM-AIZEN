@@ -17,6 +17,8 @@ const socketModule = require('./socket');
 const tripsRouter = require('./routes/trips');
 const devicesRouter = require('./routes/devices');
 const emergencyRouter = require('./routes/emergency');
+const navigationRouter = require('./routes/navigation');
+const aiRouter = require('./routes/ai');
 
 // 1. Initialize SQLite Database & Tables
 console.log('[Server] Initializing database...');
@@ -36,21 +38,28 @@ app.use(express.static(frontendPath));
 app.use('/api/trips', tripsRouter);
 app.use('/api/devices', devicesRouter);
 app.use('/api/emergency-events', emergencyRouter);
+app.use('/api/navigation', navigationRouter);
+app.use('/api/ai', aiRouter);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'online',
     system: 'Turn-by-Turn Rider Assistant IoT Backend',
-    version: '1.0.0',
+    version: '2.0.0',
+    mapEngine: 'Leaflet + OpenStreetMap + OSRM',
     timestamp: new Date().toISOString()
   });
 });
 
-// Config endpoint providing Google Maps API key
+// Config endpoint providing system configuration
 app.get('/api/config', (req, res) => {
   res.json({
-    googleMapsApiKey: config.GOOGLE_MAPS_API_KEY || ''
+    mapProvider: 'leaflet_osm',
+    country: 'India',
+    defaultCenter: { lat: 20.5937, lng: 78.9629 },
+    defaultZoom: 5,
+    version: '2.0.0'
   });
 });
 

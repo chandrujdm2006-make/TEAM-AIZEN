@@ -183,6 +183,9 @@ class RideSimulator {
   }
 
   async sendLocation(lat, lng, speed, heading) {
+    if (window.navMap) {
+      window.navMap.updateRiderPosition(lat, lng, heading, speed);
+    }
     try {
       await fetch(`/api/devices/${this.deviceId}/location`, {
         method: 'POST',

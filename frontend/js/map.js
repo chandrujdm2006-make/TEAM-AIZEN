@@ -1,298 +1,414 @@
 /**
- * Google Maps JavaScript API Navigation Controller
+ * India-Wide OpenStreetMap & Leaflet Navigation Controller
  * Turn-by-Turn Rider Assistant - Dept. of IT
  * 
  * Features:
- * - Google Maps JavaScript API with Dark Cockpit HUD Styling
- * - Google Places Autocomplete Destination Search
- * - Google Directions API Driving Route Engine
- * - Geolocation GPS Live Tracking (getCurrentPosition & watchPosition)
- * - Turn-by-Turn Instruction Parser (STRAIGHT, LEFT, RIGHT, SLIGHT_LEFT, SLIGHT_RIGHT, U_TURN, ROUNDABOUT, DESTINATION)
- * - Synchronized with SSD1306 OLED HUD Simulator & Telemetry Gauges
- * - Proximity Destination Arrival Detection (<= 20 meters)
- * - Environment Variable API Key Configuration (.env fallback screen)
+ * - 100% Free & Open-Source: Leaflet + OpenStreetMap + OSRM (Zero Google API Key Required)
+ * - Initial View: Entire Country of India (Zoom from India -> State -> City -> Street)
+ * - Real OpenStreetMap Geocoding: City, College, Hospital, Station, Airport, Address across India
+ * - Start Location: Browser GPS (getCurrentPosition & watchPosition) OR Manual Search
+ * - Destination Location: Autocomplete search with Place Name, Address, Lat, Longitude
+ * - Real Road Route Calculation via OSRM Driving Engine with high-precision road geometry
+ * - Upgraded Next Turn Card with direction icon, countdown distance, and street name
+ * - Distance, Speed, Heading & ETA synchronization
+ * - Synchronized with Physical SSD1306 OLED HUD Simulator & AI Navigation Copilot
+ * - GPS Signal Unavailable & Route Failure Error Handlers with Manual Selection
  */
 
 class NavigationMap {
   constructor(mapContainerId = 'map') {
     this.mapContainerId = mapContainerId;
     this.map = null;
-    this.apiKey = null;
-    this.isLoaded = false;
+    this.tileLayers = {};
+    this.currentTileStyle = 'dark'; // 'dark' (CartoDB Dark Matter / OSM) or 'osm' (Standard OSM)
+
+    // Navigation State
+    this.startLocation = null;     // { lat, lng, name, address }
+    this.destination = null;       // { lat, lng, name, address }
+    this.currentLocation = null;   // { lat, lng, heading, speed }
     this.isNavigating = false;
     this.watchId = null;
-
-    // Navigation state
-    this.currentLocation = null; // { latitude, longitude }
-    this.destination = null;     // { latitude, longitude, name, address }
-    this.currentMarker = null;
-    this.currentPulseCircle = null;
-    this.destMarker = null;
-    this.directionsService = null;
-    this.directionsRenderer = null;
-    this.autocomplete = null;
-
-    // Route & Step tracking
-    this.activeRoute = null;
-    this.routeSteps = [];
+    this.activeRoute = null;       // full route data from OSRM
+    this.routeSteps = [];          // turn-by-turn maneuver points
     this.currentStepIndex = 0;
-    this.totalSteps = 0;
-    this.hasReachedDestination = false;
-    this.lastRecalcLocation = null;
-    this.lastGpsSpeedKmh = null;
+    this.hasArrived = false;
+
+    // Leaflet Layers
+    this.startMarker = null;
+    this.destMarker = null;
+    this.riderMarker = null;
+    this.routePolyline = null;
+    this.routeGlowPolyline = null;
+
+    // Search Debounce Timers
+    this.startSearchTimer = null;
+    this.destSearchTimer = null;
 
     // DOM Elements
     this.mapWrapper = document.getElementById('map-wrapper');
-    this.notConfiguredOverlay = document.getElementById('gmaps-not-configured');
     this.noticeContainer = document.getElementById('map-notice-container');
+    this.startInput = document.getElementById('start-input');
     this.destInput = document.getElementById('destination-input');
+    this.startSearchResults = document.getElementById('start-search-results');
+    this.destSearchResults = document.getElementById('dest-search-results');
+    this.startChipText = document.getElementById('start-chip-text');
+    this.startChipCoords = document.getElementById('start-chip-coords');
+    this.destChipText = document.getElementById('dest-chip-text');
+    this.destChipCoords = document.getElementById('dest-chip-coords');
     this.btnCurrentLoc = document.getElementById('btn-use-current-location');
-    this.btnSearch = document.getElementById('btn-search-destination');
+    this.btnGenerateRoute = document.getElementById('btn-generate-route');
     this.btnStartNav = document.getElementById('btn-start-navigation');
+    this.btnStopNav = document.getElementById('btn-stop-navigation');
 
     this.init();
   }
 
   /**
-   * 1. Bootstrap: Fetch API key and load Google Maps SDK
+   * 1. Initialize Leaflet Map centered on India
    */
-  async init() {
+  init() {
+    this.initLeafletMap();
     this.initEventListeners();
+    this.initSearchAutocomplete();
 
-    try {
-      const res = await fetch('/api/config');
-      const data = await res.json();
-      this.apiKey = (data.googleMapsApiKey || '').trim();
-
-      if (!this.apiKey || this.apiKey === 'YOUR_GOOGLE_MAPS_API_KEY') {
-        this.showNotConfiguredError();
-        return;
-      }
-
-      await this.loadGoogleMapsScript(this.apiKey);
-      this.initGoogleMap();
-    } catch (err) {
-      console.warn('[Map] Could not fetch Google Maps API config:', err);
-      this.showNotConfiguredError();
-    }
-  }
-
-  /**
-   * Show "GOOGLE MAPS NOT CONFIGURED" when API key is missing
-   */
-  showNotConfiguredError() {
-    if (this.notConfiguredOverlay) {
-      this.notConfiguredOverlay.style.display = 'flex';
-    }
-    this.showNotice('Google Maps API key is not configured. Add your key to .env file and restart server.', 'warning');
-  }
-
-  /**
-   * Dynamically inject Google Maps JavaScript API with Places and Geometry libraries
-   */
-  loadGoogleMapsScript(apiKey) {
-    return new Promise((resolve, reject) => {
-      if (window.google && window.google.maps) {
-        resolve();
-        return;
-      }
-
-      const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places,geometry&loading=async`;
-      script.async = true;
-      script.defer = true;
-      script.onload = () => {
-        console.log('[Map] Google Maps JavaScript API loaded successfully');
-        resolve();
-      };
-      script.onerror = () => {
-        console.error('[Map] Failed to load Google Maps SDK');
-        this.showNotice('Google Maps failed to load. Check API key restrictions and network connection.', 'error');
-        this.showNotConfiguredError();
-        reject(new Error('Google Maps script failed to load'));
-      };
-      document.head.appendChild(script);
-    });
-  }
-
-  /**
-   * 2. Initialize Google Map with Futuristic Dark Theme
-   */
-  initGoogleMap() {
-    if (!window.google || !window.google.maps) return;
-
-    if (this.notConfiguredOverlay) {
-      this.notConfiguredOverlay.style.display = 'none';
-    }
-
-    const defaultCenter = { lat: 12.9716, lng: 77.5946 }; // Default center
-
-    // Dark/Night HUD Style
-    const darkStyle = [
-      { elementType: 'geometry', stylers: [{ color: '#0d131f' }] },
-      { elementType: 'labels.text.stroke', stylers: [{ color: '#070a10' }] },
-      { elementType: 'labels.text.fill', stylers: [{ color: '#94a3b8' }] },
-      { featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{ color: '#00f0ff' }] },
-      { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#64748b' }] },
-      { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#111c2e' }] },
-      { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#38bdf8' }] },
-      { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1a2538' }] },
-      { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#131b28' }] },
-      { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#cbd5e1' }] },
-      { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#223554' }] },
-      { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#162338' }] },
-      { featureType: 'road.highway', elementType: 'labels.text.fill', stylers: [{ color: '#38bdf8' }] },
-      { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#162235' }] },
-      { featureType: 'transit.station', elementType: 'labels.text.fill', stylers: [{ color: '#00f0ff' }] },
-      { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#070c14' }] },
-      { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#38bdf8' }] },
-      { featureType: 'water', elementType: 'labels.text.stroke', stylers: [{ color: '#070a10' }] }
-    ];
-
-    const mapElement = document.getElementById(this.mapContainerId);
-    this.map = new google.maps.Map(mapElement, {
-      center: defaultCenter,
-      zoom: 14,
-      styles: darkStyle,
-      disableDefaultUI: false,
-      zoomControl: true,
-      mapTypeControl: false,
-      streetViewControl: false,
-      fullscreenControl: true
-    });
-
-    this.directionsService = new google.maps.DirectionsService();
-    this.directionsRenderer = new google.maps.DirectionsRenderer({
-      map: this.map,
-      suppressMarkers: true,
-      preserveViewport: false,
-      polylineOptions: {
-        strokeColor: '#00f0ff',
-        strokeWeight: 6,
-        strokeOpacity: 0.95
-      }
-    });
-
-    // Initialize Places Autocomplete
-    this.initPlacesAutocomplete();
-
-    this.isLoaded = true;
-
-    // Automatically attempt to obtain current location on page load
+    // Automatically try to obtain GPS location on startup (graceful fallback if denied)
     this.requestCurrentLocation(false);
   }
 
-  /**
-   * 3. Google Places Autocomplete Destination Search
-   */
-  initPlacesAutocomplete() {
-    if (!this.destInput || !window.google || !window.google.maps || !window.google.maps.places) return;
+  initLeafletMap() {
+    const mapEl = document.getElementById(this.mapContainerId);
+    if (!mapEl) return;
 
-    this.autocomplete = new google.maps.places.Autocomplete(this.destInput, {
-      fields: ['geometry', 'name', 'formatted_address']
-    });
-
-    if (this.map) {
-      this.autocomplete.bindTo('bounds', this.map);
+    if (typeof L === 'undefined') {
+      console.error('[Map] Leaflet library not loaded.');
+      this.showNotice('Map engine failed to load. Please refresh the page.', 'error');
+      return;
     }
 
-    this.autocomplete.addListener('place_changed', () => {
-      const place = this.autocomplete.getPlace();
-      if (!place || !place.geometry || !place.geometry.location) {
-        this.showNotice('Location not found. Please select a destination from the suggestions.', 'warning');
+    // Configure Leaflet default image asset path
+    L.Icon.Default.imagePath = 'assets/images/';
+
+    // Center of India: Lat ~20.5937, Lng ~78.9629. Zoom: 5 covers India from Kashmir to Kanyakumari
+    const indiaCenter = [20.5937, 78.9629];
+    const initialZoom = 5;
+
+    this.map = L.map(this.mapContainerId, {
+      center: indiaCenter,
+      zoom: initialZoom,
+      minZoom: 4,
+      maxZoom: 19,
+      zoomControl: false // Custom placement
+    });
+
+    // Custom Zoom control at top-left
+    L.control.zoom({ position: 'topleft' }).addTo(this.map);
+
+    // 1. Dark HUD Tile Layer (CartoDB Dark Matter - OSM based, sleek futuristic look matching HUD)
+    this.tileLayers.dark = L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
+      subdomains: 'abcd',
+      maxZoom: 19
+    });
+
+    // 2. Standard OpenStreetMap Tile Layer
+    this.tileLayers.osm = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      maxZoom: 19
+    });
+
+    // Add initial dark layer
+    this.tileLayers.dark.addTo(this.map);
+
+    console.log('[Map] India-Wide Leaflet Map initialized successfully (Coverage: India, Zoom: 5)');
+  }
+
+  /**
+   * 2. Setup DOM Listeners & UI Controls
+   */
+  initEventListeners() {
+    // Current Location button
+    if (this.btnCurrentLoc) {
+      this.btnCurrentLoc.addEventListener('click', () => {
+        this.requestCurrentLocation(true);
+      });
+    }
+
+    // Generate Route button
+    if (this.btnGenerateRoute) {
+      this.btnGenerateRoute.addEventListener('click', () => {
+        this.calculateAndDisplayRoute();
+      });
+    }
+
+    // Start Navigation button
+    if (this.btnStartNav) {
+      this.btnStartNav.addEventListener('click', () => {
+        this.startNavigation();
+      });
+    }
+
+    // Stop Navigation button
+    if (this.btnStopNav) {
+      this.btnStopNav.addEventListener('click', () => {
+        this.stopNavigation();
+      });
+    }
+
+    // Floating Map Controls: Recenter, Fit Route, Tile Style
+    const btnRecenter = document.getElementById('btn-map-recenter');
+    if (btnRecenter) {
+      btnRecenter.addEventListener('click', () => this.centerOnRider());
+    }
+
+    const btnFit = document.getElementById('btn-map-fit');
+    if (btnFit) {
+      btnFit.addEventListener('click', () => this.fitRouteBounds());
+    }
+
+    const btnTiles = document.getElementById('btn-map-tiles');
+    if (btnTiles) {
+      btnTiles.addEventListener('click', () => this.toggleTileStyle());
+    }
+
+    // Hide dropdowns when clicking outside
+    document.addEventListener('click', (e) => {
+      if (this.startSearchResults && !this.startSearchResults.contains(e.target) && e.target !== this.startInput) {
+        this.startSearchResults.style.display = 'none';
+      }
+      if (this.destSearchResults && !this.destSearchResults.contains(e.target) && e.target !== this.destInput) {
+        this.destSearchResults.style.display = 'none';
+      }
+    });
+  }
+
+  toggleTileStyle() {
+    if (!this.map) return;
+    if (this.currentTileStyle === 'dark') {
+      this.map.removeLayer(this.tileLayers.dark);
+      this.tileLayers.osm.addTo(this.map);
+      this.currentTileStyle = 'osm';
+      this.showNotice('Switched to Standard OpenStreetMap view.', 'info', 2500);
+    } else {
+      this.map.removeLayer(this.tileLayers.osm);
+      this.tileLayers.dark.addTo(this.map);
+      this.currentTileStyle = 'dark';
+      this.showNotice('Switched to Dark HUD Map view.', 'info', 2500);
+    }
+  }
+
+  /**
+   * 3. OpenStreetMap Nominatim/Photon Geocoding Autocomplete
+   */
+  initSearchAutocomplete() {
+    // Start Location Search Input
+    if (this.startInput && this.startSearchResults) {
+      this.startInput.addEventListener('input', (e) => {
+        clearTimeout(this.startSearchTimer);
+        const query = e.target.value.trim();
+        if (query.length < 2) {
+          this.startSearchResults.style.display = 'none';
+          return;
+        }
+
+        this.startSearchTimer = setTimeout(() => {
+          this.executeGeocodeSearch(query, this.startSearchResults, (selected) => {
+            this.setStartLocation(selected);
+            this.startInput.value = selected.name;
+            this.startSearchResults.style.display = 'none';
+          });
+        }, 320);
+      });
+
+      this.startInput.addEventListener('focus', () => {
+        if (this.startSearchResults.children.length > 0) {
+          this.startSearchResults.style.display = 'block';
+        }
+      });
+    }
+
+    // Destination Location Search Input
+    if (this.destInput && this.destSearchResults) {
+      this.destInput.addEventListener('input', (e) => {
+        clearTimeout(this.destSearchTimer);
+        const query = e.target.value.trim();
+        if (query.length < 2) {
+          this.destSearchResults.style.display = 'none';
+          return;
+        }
+
+        this.destSearchTimer = setTimeout(() => {
+          this.executeGeocodeSearch(query, this.destSearchResults, (selected) => {
+            this.setDestination(selected);
+            this.destInput.value = selected.name;
+            this.destSearchResults.style.display = 'none';
+          });
+        }, 320);
+      });
+
+      this.destInput.addEventListener('focus', () => {
+        if (this.destSearchResults.children.length > 0) {
+          this.destSearchResults.style.display = 'block';
+        }
+      });
+    }
+  }
+
+  /**
+   * Execute real OpenStreetMap geocode query against backend proxy
+   */
+  async executeGeocodeSearch(query, dropdownEl, onSelectCallback) {
+    dropdownEl.innerHTML = `<div style="padding:10px 14px;color:var(--text-muted);font-size:0.75rem;">🔍 Searching places across India...</div>`;
+    dropdownEl.style.display = 'block';
+
+    try {
+      const res = await fetch(`/api/navigation/search?q=${encodeURIComponent(query)}`);
+      const data = await res.json();
+
+      if (!data.success || !data.results || data.results.length === 0) {
+        dropdownEl.innerHTML = `<div style="padding:10px 14px;color:var(--text-muted);font-size:0.75rem;">No places found matching "${query}". Try another city, college, hospital, or landmark.</div>`;
         return;
       }
 
-      this.setDestination({
-        latitude: place.geometry.location.lat(),
-        longitude: place.geometry.location.lng(),
-        name: place.name || 'Selected Place',
-        address: place.formatted_address || ''
+      dropdownEl.innerHTML = '';
+      data.results.forEach((item) => {
+        const itemEl = document.createElement('div');
+        itemEl.className = 'search-result-item';
+        itemEl.innerHTML = `
+          <div class="search-result-name">
+            <span>${item.name}</span>
+            <span style="font-size:0.65rem;color:var(--accent-cyan);">${item.city ? item.city : 'India'}</span>
+          </div>
+          <div class="search-result-addr" title="${item.address}">${item.address}</div>
+          <div class="search-result-coords">📍 ${item.lat.toFixed(4)}, ${item.lng.toFixed(4)}</div>
+        `;
+
+        itemEl.addEventListener('click', () => {
+          onSelectCallback(item);
+        });
+
+        dropdownEl.appendChild(itemEl);
       });
-    });
+    } catch (err) {
+      console.error('[Map] Search error:', err);
+      dropdownEl.innerHTML = `<div style="padding:10px 14px;color:var(--accent-red);font-size:0.75rem;">Location search unavailable. Check connection.</div>`;
+    }
   }
 
   /**
-   * Set Destination & Update Destination Marker
+   * 4. Start Location Handling
    */
-  setDestination({ latitude, longitude, name, address }) {
-    this.destination = { latitude, longitude, name, address };
-    console.log('[Map] Destination set:', this.destination);
+  setStartLocation(location) {
+    this.startLocation = {
+      lat: location.lat,
+      lng: location.lng,
+      name: location.name || 'Start Location',
+      address: location.address || ''
+    };
 
-    const latLng = new google.maps.LatLng(latitude, longitude);
-
-    // Update Destination Marker (Checkered Red/White Flag)
-    if (!this.destMarker) {
-      this.destMarker = new google.maps.Marker({
-        position: latLng,
-        map: this.map,
-        title: name,
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          scale: 10,
-          fillColor: '#ef4444',
-          fillOpacity: 1,
-          strokeColor: '#ffffff',
-          strokeWeight: 3
-        }
-      });
-    } else {
-      this.destMarker.setPosition(latLng);
-      this.destMarker.setTitle(name);
-      this.destMarker.setVisible(true);
+    if (this.startChipText) {
+      this.startChipText.innerText = `📍 ${this.startLocation.name}`;
+    }
+    if (this.startChipCoords) {
+      this.startChipCoords.innerText = `${this.startLocation.lat.toFixed(4)}, ${this.startLocation.lng.toFixed(4)}`;
     }
 
-    // Update Title Badge
+    // Place emerald Start Marker
+    if (this.startMarker && this.map) {
+      this.map.removeLayer(this.startMarker);
+    }
+
+    const startIcon = L.divIcon({
+      className: 'custom-start-icon',
+      html: `<div class="hud-start-marker" title="${this.startLocation.name}">A</div>`,
+      iconSize: [28, 28],
+      iconAnchor: [14, 14]
+    });
+
+    this.startMarker = L.marker([this.startLocation.lat, this.startLocation.lng], {
+      icon: startIcon,
+      title: `Start: ${this.startLocation.name}`
+    }).addTo(this.map);
+
+    this.startMarker.bindPopup(`<strong>Start Location</strong><br>${this.startLocation.name}<br><small>${this.startLocation.address}</small>`);
+
+    // If destination is not selected yet, pan to start
+    if (!this.destination && this.map) {
+      this.map.setView([this.startLocation.lat, this.startLocation.lng], 14);
+    }
+
+    this.updateFlowStep(1, true);
+    this.showNotice(`Start location set: ${this.startLocation.name}`, 'info', 3000);
+
+    // If destination already chosen, prompt to generate route
+    if (this.destination) {
+      this.updateFlowStep(3, false);
+    }
+  }
+
+  /**
+   * 5. Destination Location Handling
+   */
+  setDestination(location) {
+    this.destination = {
+      lat: location.lat,
+      lng: location.lng,
+      name: location.name || 'Destination',
+      address: location.address || ''
+    };
+
+    if (this.destChipText) {
+      this.destChipText.innerText = `🏁 ${this.destination.name}`;
+    }
+    if (this.destChipCoords) {
+      this.destChipCoords.innerText = `${this.destination.lat.toFixed(4)}, ${this.destination.lng.toFixed(4)}`;
+    }
+
+    // Place Destination Marker
+    if (this.destMarker && this.map) {
+      this.map.removeLayer(this.destMarker);
+    }
+
+    const destIcon = L.divIcon({
+      className: 'custom-dest-icon',
+      html: `
+        <div class="hud-dest-marker" title="${this.destination.name}">
+          <div class="hud-dest-pin"><span>🏁</span></div>
+        </div>
+      `,
+      iconSize: [32, 40],
+      iconAnchor: [16, 36]
+    });
+
+    this.destMarker = L.marker([this.destination.lat, this.destination.lng], {
+      icon: destIcon,
+      title: `Destination: ${this.destination.name}`
+    }).addTo(this.map);
+
+    this.destMarker.bindPopup(`<strong>🏁 Destination</strong><br>${this.destination.name}<br><small>${this.destination.address}</small>`);
+
     const titleEl = document.getElementById('active-trip-title');
     if (titleEl) {
-      titleEl.innerText = `To: ${name}`;
+      titleEl.innerText = `To: ${this.destination.name}`;
     }
 
-    this.showNotice(`Destination selected: ${name}`, 'info');
+    this.updateFlowStep(2, true);
+    this.showNotice(`Destination selected: ${this.destination.name}`, 'info', 3000);
 
-    // If current location is already available, automatically calculate route preview
-    if (this.currentLocation) {
-      this.calculateAndDisplayRoute(false);
+    // If start is also ready, update step flow and auto fit or prompt
+    if (this.startLocation) {
+      this.updateFlowStep(3, false);
+      const bounds = L.latLngBounds(
+        [this.startLocation.lat, this.startLocation.lng],
+        [this.destination.lat, this.destination.lng]
+      );
+      this.map.fitBounds(bounds, { padding: [50, 50], maxZoom: 15 });
     } else {
-      this.map.panTo(latLng);
-      this.map.setZoom(15);
+      this.map.setView([this.destination.lat, this.destination.lng], 14);
     }
   }
 
   /**
-   * Search Destination Fallback (if user typed text and clicked Search button)
-   */
-  handleDestinationSearchButton() {
-    const query = (this.destInput?.value || '').trim();
-    if (!query) {
-      this.showNotice('Please type a destination name or address.', 'warning');
-      return;
-    }
-
-    if (!window.google || !window.google.maps) {
-      this.showNotice('Google Maps is not initialized yet.', 'warning');
-      return;
-    }
-
-    const geocoder = new google.maps.Geocoder();
-    geocoder.geocode({ address: query }, (results, status) => {
-      if (status === google.maps.GeocoderStatus.OK && results && results[0]) {
-        const result = results[0];
-        this.setDestination({
-          latitude: result.geometry.location.lat(),
-          longitude: result.geometry.location.lng(),
-          name: query,
-          address: result.formatted_address
-        });
-      } else {
-        this.showNotice(`Could not find location "${query}". Try another address.`, 'error');
-      }
-    });
-  }
-
-  /**
-   * 4. Current Location Acquisition
-   * Uses navigator.geolocation.getCurrentPosition()
+   * 6. Browser GPS Acquisition (navigator.geolocation)
    */
   requestCurrentLocation(isUserInitiated = true) {
     if (!navigator.geolocation) {
@@ -301,624 +417,612 @@ class NavigationMap {
     }
 
     if (isUserInitiated) {
-      this.showNotice('Requesting current GPS coordinates...', 'info');
+      this.showNotice('Acquiring live GPS coordinates from your device...', 'info', 2500);
     }
 
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
+      async (pos) => {
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
-        this.currentLocation = { latitude: lat, longitude: lng };
-        console.log('[Map] Current Location acquired:', this.currentLocation);
+        const speedKmh = pos.coords.speed !== null && pos.coords.speed >= 0 ? Math.round(pos.coords.speed * 3.6) : null;
+        const headingDeg = pos.coords.heading || 0;
 
-        this.updateCurrentLocationMarker(lat, lng, pos.coords.heading || 0);
+        this.currentLocation = { lat, lng, speed: speedKmh, heading: headingDeg };
+        console.log('[Map] Acquired live GPS location:', this.currentLocation);
 
-        if (this.map) {
-          this.map.panTo(new google.maps.LatLng(lat, lng));
-          this.map.setZoom(16);
+        // Update Rider Marker on Map
+        this.updateRiderPosition(lat, lng, headingDeg);
+
+        // Reverse geocode to get city/place name in India
+        let placeName = `GPS Location (${lat.toFixed(4)}, ${lng.toFixed(4)})`;
+        let placeAddr = 'Your current position';
+        try {
+          const revRes = await fetch(`/api/navigation/reverse?lat=${lat}&lng=${lng}`);
+          const revData = await revRes.json();
+          if (revData.success && revData.name) {
+            placeName = revData.name;
+            placeAddr = revData.address;
+          }
+        } catch (e) {
+          console.warn('[Map] Reverse geocode lookup note:', e.message);
+        }
+
+        // Set as Start Location
+        this.setStartLocation({
+          lat,
+          lng,
+          name: placeName,
+          address: placeAddr
+        });
+
+        if (this.startInput) {
+          this.startInput.value = placeName;
         }
 
         if (isUserInitiated) {
-          this.showNotice('Current location updated.', 'info');
-        }
-
-        // If destination is already selected, calculate route
-        if (this.destination) {
-          this.calculateAndDisplayRoute(false);
+          this.showNotice(`Current location set: ${placeName}`, 'success', 3000);
         }
       },
       (err) => {
         console.warn('[Map] Geolocation error:', err.message);
         if (err.code === 1) { // PERMISSION_DENIED
-          this.showNotice('Location permission denied. Please enable location access.', 'error');
+          this.showNotice('GPS SIGNAL UNAVAILABLE: Location permission was denied. Please select your starting point manually using the search box above.', 'warning', 7000);
         } else if (isUserInitiated) {
-          this.showNotice('GPS signal unavailable. Please check device location settings.', 'error');
+          this.showNotice('GPS SIGNAL UNAVAILABLE: Could not obtain satellite fix. Please search your starting location manually.', 'warning', 7000);
         }
       },
       {
         enableHighAccuracy: true,
         timeout: 10000,
-        maximumAge: 2000
+        maximumAge: 3000
       }
     );
   }
 
   /**
-   * Update Cyan Rider Navigation Marker
+   * 7. Real Road Route Calculation via OSRM Engine
    */
-  updateCurrentLocationMarker(lat, lng, heading = 0) {
-    if (!this.map || !window.google) return;
-
-    const latLng = new google.maps.LatLng(lat, lng);
-
-    const cyanArrowIcon = {
-      path: google.maps.SymbolPath.FORWARD_CLOSED_ARROW,
-      scale: 6,
-      fillColor: '#00f0ff',
-      fillOpacity: 1,
-      strokeColor: '#0f172a',
-      strokeWeight: 2,
-      rotation: heading || 0,
-      anchor: new google.maps.Point(0, 2.5)
-    };
-
-    if (!this.currentMarker) {
-      this.currentMarker = new google.maps.Marker({
-        position: latLng,
-        map: this.map,
-        title: 'Current Position',
-        icon: cyanArrowIcon,
-        zIndex: 1000
-      });
-
-      this.currentPulseCircle = new google.maps.Circle({
-        map: this.map,
-        center: latLng,
-        radius: 20,
-        fillColor: '#00f0ff',
-        fillOpacity: 0.2,
-        strokeColor: '#00f0ff',
-        strokeOpacity: 0.6,
-        strokeWeight: 1.5
-      });
-    } else {
-      this.currentMarker.setPosition(latLng);
-      this.currentMarker.setIcon(cyanArrowIcon);
-      if (this.currentPulseCircle) {
-        this.currentPulseCircle.setCenter(latLng);
-      }
-    }
-  }
-
-  /**
-   * 5. Calculate and Display Driving Route using Google Directions API
-   */
-  calculateAndDisplayRoute(startActiveNav = false) {
-    if (!this.currentLocation || !this.destination) {
-      if (!this.currentLocation) this.showNotice('Waiting for current location...', 'warning');
-      else if (!this.destination) this.showNotice('Select a destination first.', 'warning');
+  async calculateAndDisplayRoute() {
+    if (!this.startLocation) {
+      this.showNotice('Please select your Start Location first (or click 📍 My GPS).', 'warning');
+      this.startInput?.focus();
       return;
     }
-
-    if (!this.directionsService || !this.directionsRenderer) {
-      this.showNotice('Navigation service not ready.', 'error');
-      return;
-    }
-
-    this.showNotice('Calculating optimal driving route...', 'info');
-
-    const request = {
-      origin: new google.maps.LatLng(this.currentLocation.latitude, this.currentLocation.longitude),
-      destination: new google.maps.LatLng(this.destination.latitude, this.destination.longitude),
-      travelMode: google.maps.TravelMode.DRIVING
-    };
-
-    this.directionsService.route(request, (result, status) => {
-      if (status === google.maps.DirectionsStatus.OK && result.routes && result.routes.length > 0) {
-        this.activeRoute = result.routes[0];
-        this.directionsRenderer.setDirections(result);
-
-        const leg = this.activeRoute.legs[0];
-        console.log(`[Map] Route calculated: ${leg.distance.text}, ${leg.duration.text}, ${leg.steps.length} steps`);
-
-        // Parse turn-by-turn steps
-        this.parseRouteSteps(leg);
-
-        // Fit route bounds nicely on map
-        if (this.activeRoute.bounds && this.map) {
-          this.map.fitBounds(this.activeRoute.bounds);
-        }
-
-        // Update HUD Telemetry
-        const destDistEl = document.getElementById('metric-dest-dist');
-        if (destDistEl) destDistEl.innerText = leg.distance.text;
-
-        this.lastRecalcLocation = { ...this.currentLocation };
-        this.hasReachedDestination = false;
-
-        // If user pressed START NAVIGATION, begin live GPS tracking
-        if (startActiveNav) {
-          this.beginActiveNavigation();
-        } else {
-          // Preview first turn
-          if (this.routeSteps.length > 0) {
-            this.updateHudWithStep(this.routeSteps[0], 0);
-          }
-        }
-
-        this.showNotice(`Route ready: ${leg.distance.text} (${leg.duration.text})`, 'info');
-      } else {
-        console.error('[Map] Directions request failed:', status);
-        this.showNotice(`Route calculation failed (${status}). Please try another destination.`, 'error');
-      }
-    });
-  }
-
-  /**
-   * 6. Parse Google Directions Steps into Standard Maneuver States
-   * Directions: STRAIGHT, LEFT, RIGHT, SLIGHT_LEFT, SLIGHT_RIGHT, U_TURN, ROUNDABOUT, DESTINATION
-   */
-  parseRouteSteps(leg) {
-    this.routeSteps = [];
-    const steps = leg.steps;
-
-    for (let i = 0; i < steps.length; i++) {
-      const step = steps[i];
-      const parsed = this.mapStepToDirectionState(step);
-      parsed.stepNumber = i + 1;
-      parsed.totalSteps = steps.length;
-      this.routeSteps.push(parsed);
-    }
-
-    // Add final Destination point
-    this.routeSteps.push({
-      state: 'DESTINATION',
-      maneuver: 'arrive',
-      instruction: `Arrive at ${this.destination.name}`,
-      distanceM: 0,
-      formattedDistance: '0 m',
-      stepNumber: steps.length + 1,
-      totalSteps: steps.length + 1,
-      startLocation: {
-        lat: leg.end_location.lat(),
-        lng: leg.end_location.lng()
-      }
-    });
-
-    this.currentStepIndex = 0;
-    this.totalSteps = this.routeSteps.length;
-  }
-
-  /**
-   * Convert Google Maps HTML Step to clean instruction & standard direction state
-   */
-  mapStepToDirectionState(step) {
-    const rawHtml = step.instructions || '';
-    const cleanText = rawHtml.replace(/<[^>]*>?/gm, ' ').replace(/\s+/g, ' ').trim();
-    const lower = cleanText.toLowerCase();
-    const maneuver = (step.maneuver || '').toLowerCase();
-
-    let state = 'STRAIGHT';
-    let cleanManeuver = 'straight';
-
-    if (maneuver.includes('u-turn') || lower.includes('u-turn') || lower.includes('make a u-turn')) {
-      state = 'U_TURN';
-      cleanManeuver = 'uturn';
-    } else if (maneuver.includes('roundabout') || lower.includes('roundabout') || lower.includes('rotary')) {
-      state = 'ROUNDABOUT';
-      cleanManeuver = 'roundabout';
-    } else if (maneuver.includes('sharp-left') || lower.includes('sharp left')) {
-      state = 'LEFT';
-      cleanManeuver = 'turn-sharp-left';
-    } else if (maneuver.includes('sharp-right') || lower.includes('sharp right')) {
-      state = 'RIGHT';
-      cleanManeuver = 'turn-sharp-right';
-    } else if (maneuver.includes('slight-left') || lower.includes('slight left') || lower.includes('bear left') || lower.includes('fork left')) {
-      state = 'SLIGHT_LEFT';
-      cleanManeuver = 'turn-slight-left';
-    } else if (maneuver.includes('slight-right') || lower.includes('slight right') || lower.includes('bear right') || lower.includes('fork right')) {
-      state = 'SLIGHT_RIGHT';
-      cleanManeuver = 'turn-slight-right';
-    } else if (maneuver.includes('turn-left') || lower.includes('turn left') || lower.includes('keep left')) {
-      state = 'LEFT';
-      cleanManeuver = 'turn-left';
-    } else if (maneuver.includes('turn-right') || lower.includes('turn right') || lower.includes('keep right')) {
-      state = 'RIGHT';
-      cleanManeuver = 'turn-right';
-    } else if (lower.includes('destination') || lower.includes('arrive') || lower.includes('reached')) {
-      state = 'DESTINATION';
-      cleanManeuver = 'arrive';
-    }
-
-    return {
-      state,
-      maneuver: cleanManeuver,
-      instruction: cleanText || 'Continue Straight',
-      distanceM: step.distance ? step.distance.value : 0,
-      formattedDistance: step.distance ? step.distance.text : '0 m',
-      durationS: step.duration ? step.duration.value : 0,
-      startLocation: {
-        lat: step.start_location.lat(),
-        lng: step.start_location.lng()
-      },
-      endLocation: {
-        lat: step.end_location.lat(),
-        lng: step.end_location.lng()
-      }
-    };
-  }
-
-  /**
-   * 7. Start / Stop Active Turn-by-Turn Navigation
-   */
-  toggleNavigation() {
-    if (this.isNavigating) {
-      this.stopNavigation();
-    } else {
-      this.startNavigation();
-    }
-  }
-
-  startNavigation() {
-    if (!this.currentLocation) {
-      this.showNotice('Waiting for current location...', 'warning');
-      this.requestCurrentLocation(true);
-      return;
-    }
-
     if (!this.destination) {
-      this.showNotice('Select a destination first.', 'warning');
-      if (this.destInput) this.destInput.focus();
+      this.showNotice('Please select your Destination in India.', 'warning');
+      this.destInput?.focus();
       return;
     }
 
-    // If route is not calculated yet, calculate then begin
-    if (!this.activeRoute || this.routeSteps.length === 0) {
-      this.calculateAndDisplayRoute(true);
-      return;
-    }
+    this.showNotice(`Calculating real road route: ${this.startLocation.name} → ${this.destination.name}...`, 'info');
+    const hudStatus = document.getElementById('hud-current-instruction');
+    if (hudStatus) hudStatus.innerText = 'Calculating OSRM Road Route...';
 
-    this.beginActiveNavigation();
+    try {
+      const response = await fetch('/api/navigation/route', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          originLat: this.startLocation.lat,
+          originLng: this.startLocation.lng,
+          destLat: this.destination.lat,
+          destLng: this.destination.lng,
+          originName: this.startLocation.name,
+          destName: this.destination.name
+        })
+      });
+
+      const data = await response.json();
+      if (!data.success || !data.steps || data.steps.length === 0) {
+        throw new Error(data.message || 'ROUTE SERVICE UNAVAILABLE');
+      }
+
+      this.activeRoute = data;
+      this.routeSteps = data.steps;
+      this.currentStepIndex = 0;
+      this.hasArrived = false;
+
+      // Draw real road polyline onto Leaflet map
+      this.drawRoute(this.routeSteps, data.geometry);
+
+      // Update Telemetry Metrics with actual OSRM distance and duration
+      const distEl = document.getElementById('metric-dest-dist');
+      if (distEl) distEl.innerText = data.formattedDistance;
+
+      const etaEl = document.getElementById('metric-eta');
+      if (etaEl) etaEl.innerText = data.formattedDuration;
+
+      const titleEl = document.getElementById('active-trip-title');
+      if (titleEl) {
+        titleEl.innerText = `${data.origin} → ${data.destination} (${data.formattedDistance})`;
+      }
+
+      // Initial Next Turn Card preview
+      if (this.routeSteps.length > 0) {
+        this.updateNextTurnCard(this.routeSteps[0], 0);
+      }
+
+      // Update Step Flow Indicator
+      this.updateFlowStep(3, true);
+      this.showNotice(`Route generated: ${data.formattedDistance} • ${data.formattedDuration}. Ready to navigate!`, 'success', 4000);
+
+      // Trigger AI Guidance update
+      if (window.aiAssistant) {
+        window.aiAssistant.onRouteCalculated(data);
+      }
+
+      // Sync with OLED simulator initial screen
+      if (window.oledDisplay && this.routeSteps.length > 0) {
+        window.oledDisplay.renderInstruction({
+          instruction: this.routeSteps[0].instruction,
+          maneuver: this.routeSteps[0].maneuver_type || 'straight',
+          distance_to_turn_m: this.routeSteps[0].distance_to_next_turn || 150,
+          formatted_distance: this.routeSteps[0].formatted_distance || '150 m',
+          progress_pct: 0,
+          current_step: 1,
+          total_steps: this.routeSteps.length
+        }, 0);
+      }
+
+      // Configure Virtual Ride Simulator if available
+      if (window.simulator) {
+        window.simulator.setRoute(this.routeSteps);
+      }
+
+    } catch (err) {
+      console.error('[Map] Route calculation error:', err);
+      this.showNotice(`ROUTE SERVICE UNAVAILABLE: ${err.message}. <button onclick="window.navMap.calculateAndDisplayRoute()" class="btn btn-secondary" style="padding:2px 8px;font-size:0.7rem;margin-left:6px;">Try Again</button>`, 'error', 9000);
+      if (hudStatus) hudStatus.innerText = 'Route Calculation Failed';
+    }
   }
 
-  beginActiveNavigation() {
+  /**
+   * 8. Draw Route on Leaflet Map
+   */
+  drawRoute(points, geometry = null) {
+    if (!this.map || !points || points.length === 0) return;
+
+    // Clear previous polylines
+    if (this.routePolyline) {
+      this.map.removeLayer(this.routePolyline);
+      this.routePolyline = null;
+    }
+    if (this.routeGlowPolyline) {
+      this.map.removeLayer(this.routeGlowPolyline);
+      this.routeGlowPolyline = null;
+    }
+
+    let latLngs = [];
+
+    // If real GeoJSON geometry is provided by OSRM, use it for exact road curves
+    if (geometry && geometry.coordinates && Array.isArray(geometry.coordinates)) {
+      // GeoJSON is [lng, lat], Leaflet is [lat, lng]
+      latLngs = geometry.coordinates.map(coord => [coord[1], coord[0]]);
+    } else {
+      // Fallback to step points
+      latLngs = points.map(p => [p.lat, p.lng]);
+    }
+
+    // Outer glow casing
+    this.routeGlowPolyline = L.polyline(latLngs, {
+      color: '#0284c7',
+      weight: 9,
+      opacity: 0.45,
+      lineCap: 'round',
+      lineJoin: 'round'
+    }).addTo(this.map);
+
+    // Inner bright cyan road line
+    this.routePolyline = L.polyline(latLngs, {
+      color: '#00f0ff',
+      weight: 5,
+      opacity: 0.95,
+      lineCap: 'round',
+      lineJoin: 'round'
+    }).addTo(this.map);
+
+    // Automatically fit route inside viewport
+    this.fitRouteBounds();
+  }
+
+  fitRouteBounds() {
+    if (this.routePolyline && this.map) {
+      this.map.fitBounds(this.routePolyline.getBounds(), {
+        padding: [45, 45],
+        maxZoom: 16
+      });
+    }
+  }
+
+  /**
+   * 9. Start / Stop Live Navigation
+   */
+  startNavigation() {
+    if (!this.activeRoute || this.routeSteps.length === 0) {
+      this.showNotice('Please generate a route first before starting navigation.', 'warning');
+      return;
+    }
+
     this.isNavigating = true;
-    this.hasReachedDestination = false;
+    this.hasArrived = false;
 
-    // Update Start Navigation button
-    if (this.btnStartNav) {
-      this.btnStartNav.innerHTML = `
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5">
-          <rect x="6" y="6" width="12" height="12"/>
-        </svg>
-        STOP NAVIGATION
-      `;
-      this.btnStartNav.className = 'btn btn-danger btn-large btn-start-nav';
-    }
+    // Update Buttons
+    if (this.btnStartNav) this.btnStartNav.style.display = 'none';
+    if (this.btnStopNav) this.btnStopNav.style.display = 'inline-flex';
 
-    this.showNotice('Navigation active. GPS tracking live.', 'info');
+    this.updateFlowStep(4, true);
+    this.showNotice('Live Navigation active! Heading to destination.', 'success', 3000);
 
-    // Configure simulation engine with Google route so Auto Ride also works seamlessly
-    if (window.simulator && this.activeRoute && this.activeRoute.overview_path) {
-      const gPoints = this.activeRoute.overview_path.map((pt, i) => ({
-        lat: pt.lat(),
-        lng: pt.lng(),
-        instruction: this.routeSteps[Math.min(i, this.routeSteps.length - 1)]?.instruction || 'Follow Route',
-        maneuver_type: this.routeSteps[Math.min(i, this.routeSteps.length - 1)]?.maneuver || 'straight',
-        distance_to_next_turn: 100
-      }));
-      window.simulator.setRoute(gPoints);
-    }
+    const hudStatus = document.getElementById('hud-current-instruction');
+    if (hudStatus) hudStatus.innerText = 'Navigating Route';
 
-    // Start Live GPS Tracking via watchPosition()
-    this.startGpsWatch();
+    // Start watchPosition for continuous real-world GPS tracking
+    if (navigator.geolocation) {
+      this.watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          const speedKmh = pos.coords.speed !== null && pos.coords.speed >= 0 ? Math.round(pos.coords.speed * 3.6) : null;
+          const headingDeg = pos.coords.heading || 0;
 
-    // Render initial step to HUD & OLED
-    if (this.routeSteps.length > 0) {
-      this.updateHudWithStep(this.routeSteps[0], 0);
+          this.updateRiderPosition(lat, lng, headingDeg, speedKmh);
+        },
+        (err) => {
+          console.warn('[Map] Geolocation watch error:', err.message);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 1000
+        }
+      );
     }
   }
 
   stopNavigation() {
     this.isNavigating = false;
-    this.stopGpsWatch();
 
-    if (this.btnStartNav) {
-      this.btnStartNav.innerHTML = `
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5">
-          <polygon points="5 3 19 12 5 21 5 3"/>
-        </svg>
-        START NAVIGATION
-      `;
-      this.btnStartNav.className = 'btn btn-primary btn-large btn-start-nav';
-    }
-
-    // Reset speed
-    const speedEl = document.getElementById('metric-speed');
-    if (speedEl) speedEl.innerText = '--';
-
-    if (!this.hasReachedDestination && window.oledDisplay) {
-      window.oledDisplay.renderStandby('ESP32-C3', 'Navigation Paused');
-    }
-
-    this.showNotice('Navigation stopped.', 'info');
-  }
-
-  /**
-   * 8. GPS Live Tracking via navigator.geolocation.watchPosition()
-   */
-  startGpsWatch() {
-    if (!navigator.geolocation) return;
-    this.stopGpsWatch();
-
-    this.watchId = navigator.geolocation.watchPosition(
-      (pos) => this.onGpsPositionUpdate(pos),
-      (err) => console.warn('[Map] GPS Watch error:', err.message),
-      {
-        enableHighAccuracy: true,
-        maximumAge: 1000,
-        timeout: 8000
-      }
-    );
-  }
-
-  stopGpsWatch() {
     if (this.watchId !== null) {
       navigator.geolocation.clearWatch(this.watchId);
       this.watchId = null;
     }
+
+    if (this.btnStartNav) this.btnStartNav.style.display = 'inline-flex';
+    if (this.btnStopNav) this.btnStopNav.style.display = 'none';
+
+    this.showNotice('Navigation paused.', 'info', 2500);
+    const hudStatus = document.getElementById('hud-current-instruction');
+    if (hudStatus) hudStatus.innerText = 'Navigation Paused';
   }
 
   /**
-   * GPS Position Update Handler
+   * 10. Rider Position Update (Called by GPS, Simulator, or ESP32 telemetry)
    */
-  onGpsPositionUpdate(pos) {
-    if (!this.isNavigating) return;
+  updateRiderPosition(lat, lng, heading = 0, speed = null) {
+    if (!this.map) return;
 
-    const lat = pos.coords.latitude;
-    const lng = pos.coords.longitude;
-    const heading = pos.coords.heading || 0;
-    const speedMs = pos.coords.speed; // speed in meters/second or null
+    this.currentLocation = { lat, lng, heading, speed };
 
-    this.currentLocation = { latitude: lat, longitude: lng };
+    // Create or update glowing Rider Marker with direction pointer
+    if (!this.riderMarker) {
+      const riderIcon = L.divIcon({
+        className: 'custom-rider-icon',
+        html: `
+          <div class="hud-rider-marker" id="hud-rider-marker-el">
+            <div class="hud-rider-needle" style="transform: rotate(${heading}deg);"></div>
+          </div>
+        `,
+        iconSize: [36, 36],
+        iconAnchor: [18, 18]
+      });
 
-    // Update Speed: Convert m/s to km/h, safely display '-- km/h' if unavailable
-    let speedKmh = null;
-    if (speedMs !== null && speedMs !== undefined && !isNaN(speedMs) && speedMs >= 0) {
-      speedKmh = Math.round(speedMs * 3.6);
+      this.riderMarker = L.marker([lat, lng], {
+        icon: riderIcon,
+        zIndexOffset: 1000
+      }).addTo(this.map);
+    } else {
+      this.riderMarker.setLatLng([lat, lng]);
+      const needle = document.getElementById('hud-rider-marker-el')?.querySelector('.hud-rider-needle');
+      if (needle) {
+        needle.style.transform = `rotate(${heading}deg)`;
+      }
     }
-    this.lastGpsSpeedKmh = speedKmh;
 
-    // Update Speedometer element
+    // Update Speedometer: show real GPS speed or '-- km/h'
     const speedEl = document.getElementById('metric-speed');
     if (speedEl) {
-      speedEl.innerText = speedKmh !== null ? speedKmh : '--';
-    }
-
-    // Update Heading element
-    const headingEl = document.getElementById('metric-heading');
-    if (headingEl) {
-      headingEl.innerText = heading ? `${Math.round(heading)}°` : '--°';
-    }
-
-    // Update Cyan Navigation Marker on Google Map
-    this.updateCurrentLocationMarker(lat, lng, heading);
-
-    // Pan map to follow rider
-    if (this.map) {
-      this.map.panTo(new google.maps.LatLng(lat, lng));
-    }
-
-    // Check Destination Proximity (<= 20 meters)
-    if (this.destination && !this.hasReachedDestination) {
-      const distToDest = this.calculateDistanceMeters(lat, lng, this.destination.latitude, this.destination.longitude);
-      if (distToDest <= 20) {
-        this.handleDestinationReached();
-        return;
+      if (speed !== null && speed !== undefined && !isNaN(speed)) {
+        speedEl.innerText = Math.round(speed);
+      } else {
+        speedEl.innerText = '--';
       }
     }
 
-    // Update Turn-by-Turn Progress
-    this.updateActiveStepProgress(lat, lng);
-
-    // Check if off-route (> 70 meters from expected path) -> Recalculate route
-    if (this.lastRecalcLocation) {
-      const movedFromLast = this.calculateDistanceMeters(lat, lng, this.lastRecalcLocation.lat, this.lastRecalcLocation.lng);
-      if (movedFromLast > 150) {
-        // Trigger soft recalculate without freezing UI
-        this.lastRecalcLocation = { lat, lng };
-        this.recalculateRouteIfOffPath(lat, lng);
-      }
+    // Update Heading
+    const headEl = document.getElementById('metric-heading');
+    if (headEl) {
+      headEl.innerText = `${Math.round(heading)}°`;
     }
 
-    // Broadcast location to backend so ESP32 & DB logs stay updated
-    this.syncLocationWithBackend(lat, lng, speedKmh || 0, heading);
+    // If active route is loaded, compute turn step progress
+    if (this.routeSteps && this.routeSteps.length > 0) {
+      this.evaluateTurnProgress(lat, lng, speed);
+    }
+  }
+
+  centerOnRider() {
+    if (this.currentLocation && this.map) {
+      this.map.panTo([this.currentLocation.lat, this.currentLocation.lng], { animate: true });
+    } else if (this.startLocation && this.map) {
+      this.map.panTo([this.startLocation.lat, this.startLocation.lng], { animate: true });
+    }
   }
 
   /**
-   * Advance turn step when rider reaches within 25m of current step waypoint
+   * 11. Calculate closest turn step, countdown distance, and arrival
    */
-  updateActiveStepProgress(lat, lng) {
-    if (!this.routeSteps || this.routeSteps.length === 0) return;
+  evaluateTurnProgress(currentLat, currentLng, speedKmh = null) {
+    if (this.hasArrived) return;
 
-    const currentStep = this.routeSteps[this.currentStepIndex];
-    if (!currentStep) return;
+    let closestIdx = 0;
+    let minDistance = Infinity;
 
-    // Distance to turn waypoint
-    const targetLoc = currentStep.endLocation || currentStep.startLocation;
-    const distToTurn = Math.round(this.calculateDistanceMeters(lat, lng, targetLoc.lat, targetLoc.lng));
-
-    // If within 25m of turn waypoint and not last step, advance to next step
-    if (distToTurn <= 25 && this.currentStepIndex < this.routeSteps.length - 1) {
-      this.currentStepIndex++;
-      console.log(`[Map] Advanced to step ${this.currentStepIndex + 1}/${this.totalSteps}`);
-      if (window.socketClient) {
-        window.socketClient.playTurnChime();
+    for (let i = 0; i < this.routeSteps.length; i++) {
+      const d = this.calculateHaversineMeters(currentLat, currentLng, this.routeSteps[i].lat, this.routeSteps[i].lng);
+      if (d < minDistance) {
+        minDistance = d;
+        closestIdx = i;
       }
     }
 
-    const activeStep = this.routeSteps[this.currentStepIndex];
-    this.updateHudWithStep(activeStep, distToTurn);
-  }
+    // Destination arrival check (under 25 meters from destination)
+    const lastStep = this.routeSteps[this.routeSteps.length - 1];
+    const distToFinal = this.calculateHaversineMeters(currentLat, currentLng, lastStep.lat, lastStep.lng);
 
-  /**
-   * Update Dashboard HUD & OLED Simulator with Active Navigation Step
-   */
-  updateHudWithStep(step, distToTurnM) {
-    if (!step) return;
+    if (distToFinal <= 25 || closestIdx >= this.routeSteps.length - 1) {
+      this.triggerDestinationReached();
+      return;
+    }
 
-    const formattedDist = distToTurnM >= 1000 
-      ? `${(distToTurnM / 1000).toFixed(1)} km` 
-      : `${distToTurnM} m`;
+    // Target step is the upcoming maneuver
+    let targetIdx = closestIdx;
+    if (minDistance < 35 && closestIdx < this.routeSteps.length - 1) {
+      targetIdx = closestIdx + 1;
+    }
 
-    // 1. HUD Current Instruction banner
-    const hudInstEl = document.getElementById('hud-current-instruction');
-    if (hudInstEl) hudInstEl.innerText = step.instruction;
+    this.currentStepIndex = targetIdx;
+    const targetStep = this.routeSteps[targetIdx];
+    const distToTurn = Math.round(this.calculateHaversineMeters(currentLat, currentLng, targetStep.lat, targetStep.lng));
 
-    // 2. Next Turn Distance
+    // Calculate remaining distance to destination
+    let remainingMeters = distToTurn;
+    for (let i = targetIdx; i < this.routeSteps.length - 1; i++) {
+      remainingMeters += this.calculateHaversineMeters(
+        this.routeSteps[i].lat, this.routeSteps[i].lng,
+        this.routeSteps[i + 1].lat, this.routeSteps[i + 1].lng
+      );
+    }
+    remainingMeters = Math.round(remainingMeters);
+
+    // Calculate Progress %
+    const totalDist = this.activeRoute?.totalDistanceM || 1;
+    const completedDist = Math.max(0, totalDist - remainingMeters);
+    const progressPct = Math.min(100, Math.max(0, Math.round((completedDist / totalDist) * 100)));
+
+    // Calculate ETA
+    let etaFormatted = '--';
+    if (speedKmh && speedKmh > 10) {
+      const etaSeconds = (remainingMeters / (speedKmh * 1000 / 3600));
+      etaFormatted = this.formatDuration(etaSeconds);
+    } else if (this.activeRoute?.totalDurationS) {
+      const remainingTime = Math.round((remainingMeters / totalDist) * this.activeRoute.totalDurationS);
+      etaFormatted = this.formatDuration(remainingTime);
+    }
+
+    // Format turn distance: e.g. "120 m" or "1.4 km"
+    const formattedTurnDist = distToTurn >= 1000 ? `${(distToTurn / 1000).toFixed(1)} km` : `${distToTurn} m`;
+    const formattedRemDist = remainingMeters >= 1000 ? `${(remainingMeters / 1000).toFixed(1)} km` : `${remainingMeters} m`;
+
+    // 1. Update Next Turn Card
+    this.updateNextTurnCard(targetStep, distToTurn);
+
+    // 2. Update Telemetry metrics
     const turnDistEl = document.getElementById('metric-turn-dist');
-    if (turnDistEl) turnDistEl.innerText = formattedDist;
+    if (turnDistEl) turnDistEl.innerText = formattedTurnDist;
 
-    // 3. Progress percentage
-    const progressPct = this.totalSteps > 0 
-      ? Math.min(100, Math.round((this.currentStepIndex / this.totalSteps) * 100)) 
-      : 0;
-    const progFillEl = document.getElementById('trip-progress-fill');
-    const progPctEl = document.getElementById('trip-progress-pct');
-    if (progFillEl) progFillEl.style.width = `${progressPct}%`;
-    if (progPctEl) progPctEl.innerText = `${progressPct}%`;
+    const remDistEl = document.getElementById('metric-dest-dist');
+    if (remDistEl) remDistEl.innerText = formattedRemDist;
 
-    // 4. Update OLED Display Simulator
+    const etaEl = document.getElementById('metric-eta');
+    if (etaEl) etaEl.innerText = etaFormatted;
+
+    const pctEl = document.getElementById('trip-progress-pct');
+    if (pctEl) pctEl.innerText = `${progressPct}%`;
+
+    const fillEl = document.getElementById('trip-progress-fill');
+    if (fillEl) fillEl.style.width = `${progressPct}%`;
+
+    const hudInstruction = document.getElementById('hud-current-instruction');
+    if (hudInstruction) {
+      hudInstruction.innerText = `${targetStep.instruction} (${formattedTurnDist})`;
+    }
+
+    // 3. Send Instruction state to OLED Simulator
+    const instructionData = {
+      instruction: targetStep.instruction,
+      maneuver: targetStep.maneuver_type || 'straight',
+      distance_to_turn_m: distToTurn,
+      formatted_distance: formattedTurnDist,
+      distance_to_destination_m: remainingMeters,
+      progress_pct: progressPct,
+      current_step: targetIdx + 1,
+      total_steps: this.routeSteps.length,
+      street_name: targetStep.street_name || ''
+    };
+
     if (window.oledDisplay) {
-      window.oledDisplay.renderInstruction({
-        state: step.state,
-        maneuver: step.maneuver,
-        instruction: step.instruction,
-        distance_to_turn_m: distToTurnM,
-        formatted_distance: formattedDist,
-        current_step: step.stepNumber || (this.currentStepIndex + 1),
-        total_steps: step.totalSteps || this.totalSteps,
-        progress_pct: progressPct
-      }, this.lastGpsSpeedKmh);
+      window.oledDisplay.renderInstruction(instructionData, speedKmh);
+    }
+
+    // 4. Update AI Navigation Copilot
+    if (window.aiAssistant) {
+      window.aiAssistant.updateNavigationState({
+        currentLocation: this.currentLocation,
+        destination: this.destination,
+        nextTurn: targetStep.instruction,
+        distanceToTurn: distToTurn,
+        remainingDistance: remainingMeters,
+        estimatedTime: etaFormatted,
+        speed: speedKmh,
+        maneuver: targetStep.maneuver_type,
+        street: targetStep.street_name
+      });
     }
   }
 
   /**
-   * 9. Destination Reached Handler (<= 20 meters)
+   * 12. Update Next Turn Card UI
    */
-  handleDestinationReached() {
-    if (this.hasReachedDestination) return; // Prevent repeated triggers
-    this.hasReachedDestination = true;
+  updateNextTurnCard(step, distMeters) {
+    const iconWrap = document.getElementById('hud-turn-icon');
+    const labelEl = document.getElementById('hud-maneuver-label');
+    const distEl = document.getElementById('hud-turn-distance-big');
+    const instEl = document.getElementById('hud-turn-instruction-text');
+    const subEl = document.getElementById('hud-turn-sub-text');
+
+    const maneuver = step.maneuver_type || 'straight';
+    const distText = distMeters >= 1000 ? `${(distMeters / 1000).toFixed(1)} km` : `${distMeters} m`;
+
+    if (distEl) distEl.innerText = distText;
+    if (instEl) instEl.innerText = step.instruction || 'Continue on route';
+
+    const street = step.street_name ? `Road: ${step.street_name}` : 'Continue on the designated roadway';
+    if (subEl) subEl.innerText = street;
+
+    // Maneuver label & icon
+    const maneuverUpper = maneuver.toUpperCase().replace('-', ' ');
+    if (labelEl) labelEl.innerText = `NEXT TURN: ${maneuverUpper}`;
+
+    if (iconWrap) {
+      iconWrap.innerHTML = this.getManeuverSvg(maneuver);
+    }
+  }
+
+  getManeuverSvg(maneuver) {
+    switch (maneuver) {
+      case 'turn-left':
+      case 'turn-sharp-left':
+        return `<svg viewBox="0 0 24 24"><path d="M19 19v-6a4 4 0 0 0-4-4H5M10 4L5 9l5 5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+      case 'turn-right':
+      case 'turn-sharp-right':
+        return `<svg viewBox="0 0 24 24"><path d="M5 19v-6a4 4 0 0 1 4-4h10M14 4l5 5-5 5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+      case 'turn-slight-left':
+        return `<svg viewBox="0 0 24 24"><path d="M16 19l-4-7a3 3 0 0 0-2.6-1.5H6M10 6l-4 4 4 4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+      case 'turn-slight-right':
+        return `<svg viewBox="0 0 24 24"><path d="M8 19l4-7a3 3 0 0 1 2.6-1.5H18M14 6l4 4-4 4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+      case 'uturn':
+        return `<svg viewBox="0 0 24 24"><path d="M9 19V9a5 5 0 0 1 10 0v10M5 15l4 4 4-4" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+      case 'roundabout':
+        return `<svg viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 9 9M21 7l-4 5h5" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+      case 'arrive':
+        return `<svg viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+      default:
+        return `<svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+    }
+  }
+
+  /**
+   * 13. Trigger Destination Reached
+   */
+  triggerDestinationReached() {
+    this.hasArrived = true;
     this.isNavigating = false;
-    this.stopGpsWatch();
 
-    console.log('[Map] Destination reached!');
-
-    // Update HUD
-    const hudInstEl = document.getElementById('hud-current-instruction');
-    if (hudInstEl) hudInstEl.innerText = 'DESTINATION REACHED!';
-
-    const turnDistEl = document.getElementById('metric-turn-dist');
-    if (turnDistEl) turnDistEl.innerText = '0 m';
-
-    const progFillEl = document.getElementById('trip-progress-fill');
-    const progPctEl = document.getElementById('trip-progress-pct');
-    if (progFillEl) progFillEl.style.width = '100%';
-    if (progPctEl) progPctEl.innerText = '100%';
-
-    // Update Start Nav button
-    if (this.btnStartNav) {
-      this.btnStartNav.innerHTML = `
-        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.5">
-          <polygon points="5 3 19 12 5 21 5 3"/>
-        </svg>
-        START NAVIGATION
-      `;
-      this.btnStartNav.className = 'btn btn-primary btn-large btn-start-nav';
+    if (this.watchId !== null) {
+      navigator.geolocation.clearWatch(this.watchId);
+      this.watchId = null;
     }
 
-    // Update OLED Simulator
+    if (this.btnStartNav) this.btnStartNav.style.display = 'inline-flex';
+    if (this.btnStopNav) this.btnStopNav.style.display = 'none';
+
+    const destName = this.destination?.name || 'Destination';
+    const hudStatus = document.getElementById('hud-current-instruction');
+    if (hudStatus) hudStatus.innerText = '🏁 Destination Reached!';
+
+    const labelEl = document.getElementById('hud-maneuver-label');
+    if (labelEl) labelEl.innerText = 'DESTINATION REACHED';
+
+    const distEl = document.getElementById('hud-turn-distance-big');
+    if (distEl) distEl.innerText = '0 m';
+
+    const instEl = document.getElementById('hud-turn-instruction-text');
+    if (instEl) instEl.innerText = `You have arrived at ${destName}! Safe journey completed.`;
+
+    const iconWrap = document.getElementById('hud-turn-icon');
+    if (iconWrap) iconWrap.innerHTML = this.getManeuverSvg('arrive');
+
+    // Update Progress to 100%
+    const pctEl = document.getElementById('trip-progress-pct');
+    if (pctEl) pctEl.innerText = '100%';
+    const fillEl = document.getElementById('trip-progress-fill');
+    if (fillEl) fillEl.style.width = '100%';
+
+    // OLED Flag screen
     if (window.oledDisplay) {
       window.oledDisplay.renderDestinationReached();
     }
 
-    // Play celebration toast
-    this.showNotice('🎉 DESTINATION REACHED! Safe travels.', 'info');
-    if (window.socketClient) {
-      window.socketClient.showToast('🎉 DESTINATION REACHED!', 'success');
+    // Step Flow 5
+    this.updateFlowStep(5, true);
+    this.showNotice(`🎉 You have reached your destination: ${destName}!`, 'success', 8000);
+
+    // AI announcement
+    if (window.aiAssistant) {
+      window.aiAssistant.onDestinationReached(destName);
     }
   }
 
   /**
-   * Check off-path deviation
+   * 14. Step Flow Indicator Update
    */
-  recalculateRouteIfOffPath(lat, lng) {
-    if (!this.directionsService || !this.destination || !this.isNavigating) return;
+  updateFlowStep(stepNumber, isCompleted = false) {
+    for (let i = 1; i <= 5; i++) {
+      const stepEl = document.getElementById(`flow-step-${i}`);
+      if (!stepEl) continue;
 
-    const request = {
-      origin: new google.maps.LatLng(lat, lng),
-      destination: new google.maps.LatLng(this.destination.latitude, this.destination.longitude),
-      travelMode: google.maps.TravelMode.DRIVING
-    };
-
-    this.directionsService.route(request, (result, status) => {
-      if (status === google.maps.DirectionsStatus.OK && result.routes && result.routes[0]) {
-        console.log('[Map] Route updated with current position');
-        this.activeRoute = result.routes[0];
-        this.directionsRenderer.setDirections(result);
-        this.parseRouteSteps(this.activeRoute.legs[0]);
+      if (i < stepNumber) {
+        stepEl.className = 'step-item completed';
+      } else if (i === stepNumber) {
+        stepEl.className = isCompleted ? 'step-item completed' : 'step-item active';
+      } else {
+        stepEl.className = 'step-item';
       }
-    });
-  }
-
-  /**
-   * Synchronize position with backend API for ESP32 and database breadcrumb
-   */
-  async syncLocationWithBackend(lat, lng, speed, heading) {
-    try {
-      await fetch('/api/devices/esp32-c3-01/location', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lat, lng, speed, heading, battery: 98 })
-      });
-    } catch (e) {
-      // Ignore network hiccup
     }
   }
 
   /**
-   * Draw Route compatibility method (for preset routes and simulation)
+   * 15. Status Notice Banner System
    */
-  drawRoute(points) {
-    if (!points || points.length === 0) return;
-    if (!this.map || !window.google) return;
+  showNotice(messageHtml, type = 'info', timeoutMs = 5000) {
+    if (!this.noticeContainer) return;
 
-    const startPt = points[0];
-    const endPt = points[points.length - 1];
+    this.noticeContainer.className = `map-notice-container ${type}`;
+    this.noticeContainer.innerHTML = messageHtml;
+    this.noticeContainer.style.display = 'block';
 
-    this.currentLocation = { latitude: startPt.lat, longitude: startPt.lng };
-    this.setDestination({
-      latitude: endPt.lat,
-      longitude: endPt.lng,
-      name: endPt.instruction || 'Destination',
-      address: ''
-    });
-  }
-
-  /**
-   * Update rider position compatibility method (for simulator script or WebSocket)
-   */
-  updateRiderPosition(lat, lng, heading = 0) {
-    this.updateCurrentLocationMarker(lat, lng, heading);
-    if (this.map && !this.isNavigating) {
-      this.map.panTo(new google.maps.LatLng(lat, lng));
+    if (timeoutMs > 0) {
+      clearTimeout(this.noticeTimeout);
+      this.noticeTimeout = setTimeout(() => {
+        this.noticeContainer.style.display = 'none';
+      }, timeoutMs);
     }
   }
 
   /**
-   * Haversine formula distance in meters
+   * Geodesic Distance Helper (Haversine formula in meters)
    */
-  calculateDistanceMeters(lat1, lon1, lat2, lon2) {
+  calculateHaversineMeters(lat1, lon1, lat2, lon2) {
     if (lat1 === lat2 && lon1 === lon2) return 0;
     const R = 6371e3;
     const phi1 = (lat1 * Math.PI) / 180;
@@ -934,57 +1038,13 @@ class NavigationMap {
     return R * c;
   }
 
-  /**
-   * UI Notification Notice helper
-   */
-  showNotice(message, type = 'info') {
-    if (!this.noticeContainer) return;
-    this.noticeContainer.className = `map-notice-container notice-${type}`;
-    this.noticeContainer.innerText = message;
-    this.noticeContainer.style.display = 'block';
-
-    if (type !== 'error') {
-      setTimeout(() => {
-        if (this.noticeContainer) this.noticeContainer.style.display = 'none';
-      }, 5000);
-    }
-  }
-
-  /**
-   * DOM Listeners
-   */
-  initEventListeners() {
-    // 1. "Use Current Location" button
-    if (this.btnCurrentLoc) {
-      this.btnCurrentLoc.addEventListener('click', () => {
-        this.requestCurrentLocation(true);
-      });
-    }
-
-    // 2. "Search Destination" button
-    if (this.btnSearch) {
-      this.btnSearch.addEventListener('click', () => {
-        this.handleDestinationSearchButton();
-      });
-    }
-
-    // 3. "START NAVIGATION" button
-    if (this.btnStartNav) {
-      this.btnStartNav.addEventListener('click', () => {
-        this.toggleNavigation();
-      });
-    }
-
-    // 4. Enter key in destination input
-    if (this.destInput) {
-      this.destInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          this.handleDestinationSearchButton();
-        }
-      });
-    }
+  formatDuration(seconds) {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.round((seconds % 3600) / 60);
+    if (hrs > 0) return `${hrs} hr ${mins} min`;
+    return `${mins} min`;
   }
 }
 
+// Global exposure
 window.NavigationMap = NavigationMap;

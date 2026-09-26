@@ -19,8 +19,10 @@ class App {
     window.oledDisplay = new OledDisplay('oled-screen');
     window.socketClient = new SocketClient();
     window.simulator = new RideSimulator();
+    window.aiAssistant = new AiNavigationAssistant();
 
     // 2. Setup DOM Listeners & Navigation Tabs
+    this.initModeSelector();
     this.initTabs();
     this.initAudioToggle();
     this.initTripForms();
@@ -30,6 +32,35 @@ class App {
     await this.loadActiveOrLatestTrip();
     await this.loadTripHistory();
     await this.loadEmergencyLogs();
+  }
+
+  initModeSelector() {
+    const btnSimple = document.getElementById('btn-mode-simple');
+    const btnAdvanced = document.getElementById('btn-mode-advanced');
+    if (!btnSimple || !btnAdvanced) return;
+
+    btnSimple.addEventListener('click', () => {
+      document.body.classList.remove('mode-advanced');
+      document.body.classList.add('mode-simple');
+      btnSimple.classList.add('active');
+      btnAdvanced.classList.remove('active');
+      if (window.navMap && window.navMap.map) {
+        setTimeout(() => window.navMap.map.invalidateSize(), 150);
+      }
+    });
+
+    btnAdvanced.addEventListener('click', () => {
+      document.body.classList.remove('mode-simple');
+      document.body.classList.add('mode-advanced');
+      btnAdvanced.classList.add('active');
+      btnSimple.classList.remove('active');
+      if (window.navMap && window.navMap.map) {
+        setTimeout(() => window.navMap.map.invalidateSize(), 150);
+      }
+    });
+
+    // Default to SIMPLE mode as requested by user
+    document.body.classList.add('mode-simple');
   }
 
   initTabs() {
@@ -52,14 +83,12 @@ class App {
     if (activeBtn) activeBtn.classList.add('active');
     if (activePane) activePane.classList.add('active');
 
-    // Trigger Google Maps resize on returning to dashboard tab
+    // Trigger Leaflet map resize on returning to dashboard tab
     if (tabId === 'tab-dashboard' && window.navMap && window.navMap.map) {
       setTimeout(() => {
-        if (window.google && window.google.maps) {
-          google.maps.event.trigger(window.navMap.map, 'resize');
-          if (window.navMap.currentLocation) {
-            window.navMap.map.panTo(new google.maps.LatLng(window.navMap.currentLocation.latitude, window.navMap.currentLocation.longitude));
-          }
+        window.navMap.map.invalidateSize();
+        if (window.navMap.currentLocation) {
+          window.navMap.map.panTo([window.navMap.currentLocation.lat, window.navMap.currentLocation.lng]);
         }
       }, 150);
     }
@@ -129,7 +158,7 @@ class App {
       const res = await fetch('/api/devices/esp32-c3-01/status');
       const data = await res.json();
 
-      if (data.activeTrip) {
+      if (data.activeTrip && data.activeTrip.status === 'in_progress') {
         const pointsRes = await fetch(`/api/trips/${data.activeTrip.id}`);
         const pointsData = await pointsRes.json();
         this.setActiveTripUI(data.activeTrip, pointsData.route_points);
@@ -138,12 +167,10 @@ class App {
           window.socketClient.updateDashboardMetrics(data.nextInstruction);
         }
       } else {
-        // Start default preset trip for immediate interactive demonstration
-        await this.startDefaultTrip();
+        console.log('[App] Full India map ready for navigation search.');
       }
     } catch (err) {
       console.warn('[App] Could not load active device status:', err.message);
-      await this.startDefaultTrip();
     }
   }
 
@@ -196,9 +223,41 @@ class App {
     this.currentTrip = trip;
     this.routePoints = points || [];
 
-    // Update map
+    // Update map start and destination
     if (window.navMap) {
+      const origLat = trip.origin_lat || trip.originLat;
+      const origLng = trip.origin_lng || trip.originLng;
+      const dLat = trip.dest_lat || trip.destLat;
+      const dLng = trip.dest_lng || trip.destLng;
+
+      if (origLat && origLng) {
+        window.navMap.setStartLocation({
+          lat: origLat,
+          lng: origLng,
+          name: trip.origin
+        });
+        if (window.navMap.startInput) window.navMap.startInput.value = trip.origin;
+      }
+
+      if (dLat && dLng) {
+        window.navMap.setDestination({
+          lat: dLat,
+          lng: dLng,
+          name: trip.destination
+        });
+        if (window.navMap.destInput) window.navMap.destInput.value = trip.destination;
+      }
+
       window.navMap.drawRoute(this.routePoints);
+      window.navMap.routeSteps = this.routePoints;
+      window.navMap.activeRoute = {
+        totalDistanceM: trip.total_distance_m || trip.totalDistanceM,
+        totalDurationS: trip.total_duration_s || trip.totalDurationS
+      };
+
+      if (this.routePoints.length > 0) {
+        window.navMap.updateNextTurnCard(this.routePoints[0], this.routePoints[0].distance_to_next_turn || 150);
+      }
     }
 
     // Configure simulator
@@ -212,6 +271,13 @@ class App {
       titleEl.innerText = `${trip.origin} → ${trip.destination}`;
     }
 
+    // Telemetry distance & ETA
+    const totalDist = trip.total_distance_m || trip.totalDistanceM;
+    if (totalDist) {
+      const distEl = document.getElementById('metric-dest-dist');
+      if (distEl) distEl.innerText = (totalDist / 1000).toFixed(1) + ' km';
+    }
+
     // OLED display preview
     if (this.routePoints.length > 0 && window.oledDisplay) {
       window.oledDisplay.renderInstruction({
@@ -223,6 +289,16 @@ class App {
         current_step: 1,
         total_steps: this.routePoints.length
       }, 0);
+    }
+
+    // AI Copilot notification
+    if (window.aiAssistant) {
+      window.aiAssistant.onRouteCalculated({
+        origin: trip.origin,
+        destination: trip.destination,
+        formattedDistance: totalDist ? (totalDist / 1000).toFixed(1) + ' km' : '--',
+        formattedDuration: trip.total_duration_s ? Math.round(trip.total_duration_s / 60) + ' min' : '--'
+      });
     }
   }
 

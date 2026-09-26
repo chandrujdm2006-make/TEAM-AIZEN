@@ -131,6 +131,7 @@ async function fetchOsrmRoute(originLat, originLng, destLat, destLng) {
   return {
     totalDistanceM: Math.round(route.distance),
     totalDurationS: Math.round(route.duration),
+    geometry: route.geometry,
     points
   };
 }
@@ -217,10 +218,33 @@ async function generateRoute({ origin, destination, originLat, originLng, destLa
     };
   }
 
-  // Try Google Maps if API Key is configured
+  // 1. Primary: Use OSRM with real road network if coordinates are provided
+  if (originLat && originLng && destLat && destLng) {
+    try {
+      console.log(`[Routing] Querying OSRM public routing API (${originLat}, ${originLng} -> ${destLat}, ${destLng})...`);
+      const osrmResult = await fetchOsrmRoute(originLat, originLng, destLat, destLng);
+      return {
+        origin: origin || 'Selected Origin',
+        destination: destination || 'Selected Destination',
+        originLat: parseFloat(originLat),
+        originLng: parseFloat(originLng),
+        destLat: parseFloat(destLat),
+        destLng: parseFloat(destLng),
+        totalDistanceM: osrmResult.totalDistanceM,
+        totalDurationS: osrmResult.totalDurationS,
+        geometry: osrmResult.geometry,
+        points: osrmResult.points,
+        provider: 'osrm'
+      };
+    } catch (err) {
+      console.warn('[Routing] OSRM primary route attempt note:', err.message);
+    }
+  }
+
+  // 2. Secondary fallback: Google Maps only if explicitly configured
   if (config.GOOGLE_MAPS_API_KEY) {
     try {
-      console.log('[Routing] Using Google Maps Directions API...');
+      console.log('[Routing] Fallback to Google Maps Directions API...');
       const gmResult = await fetchGoogleMapsRoute(origin, destination, config.GOOGLE_MAPS_API_KEY);
       return {
         origin,
@@ -235,29 +259,7 @@ async function generateRoute({ origin, destination, originLat, originLng, destLa
         provider: 'google_maps'
       };
     } catch (err) {
-      console.warn('[Routing] Google Maps failed, falling back to OSRM:', err.message);
-    }
-  }
-
-  // Try OSRM if coordinates are provided
-  if (originLat && originLng && destLat && destLng) {
-    try {
-      console.log('[Routing] Querying OSRM public routing API...');
-      const osrmResult = await fetchOsrmRoute(originLat, originLng, destLat, destLng);
-      return {
-        origin: origin || 'Selected Origin',
-        destination: destination || 'Selected Destination',
-        originLat: parseFloat(originLat),
-        originLng: parseFloat(originLng),
-        destLat: parseFloat(destLat),
-        destLng: parseFloat(destLng),
-        totalDistanceM: osrmResult.totalDistanceM,
-        totalDurationS: osrmResult.totalDurationS,
-        points: osrmResult.points,
-        provider: 'osrm'
-      };
-    } catch (err) {
-      console.warn('[Routing] OSRM failed, falling back to mock route:', err.message);
+      console.warn('[Routing] Google Maps failed:', err.message);
     }
   }
 

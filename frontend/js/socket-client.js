@@ -199,6 +199,36 @@ class SocketClient {
         text.innerText = 'OFFLINE';
       }
     }
+    this.checkEsp32DeviceStatus();
+  }
+
+  async checkEsp32DeviceStatus() {
+    const badgeText = document.getElementById('esp32-badge-text');
+    const batteryText = document.getElementById('esp32-battery-text');
+    if (!badgeText) return;
+
+    try {
+      const res = await fetch('/api/devices/esp32-c3-01/status');
+      const data = await res.json();
+      if (data.success && data.device) {
+        const lastSeen = new Date(data.device.last_seen_at).getTime();
+        const now = Date.now();
+        const isEspOnline = (now - lastSeen) < 45000; // 45s heartbeat window
+
+        if (isEspOnline) {
+          badgeText.innerText = '⚡ ESP32-C3';
+          badgeText.style.color = 'var(--accent-cyan)';
+          if (batteryText) batteryText.innerText = `${data.device.battery_level || 98}%`;
+        } else {
+          badgeText.innerText = '⚠️ ESP32 OFFLINE';
+          badgeText.style.color = 'var(--text-muted)';
+          if (batteryText) batteryText.innerText = '--%';
+        }
+      }
+    } catch (e) {
+      badgeText.innerText = '⚠️ ESP32 OFFLINE';
+      badgeText.style.color = 'var(--text-muted)';
+    }
   }
 
   updateDashboardMetrics(instruction) {
